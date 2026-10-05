@@ -1,0 +1,11 @@
+C:\dev\mcp\src\mp4shader\Gemx\bin\Debug\net8.0\Gemx.deps.json
+C:\dev\mcp\src\mp4shader\Gemx\bin\Debug\net8.0\Gemx.dll
+C:\dev\mcp\src\mp4shader\Gemx\bin\Debug\net8.0\Gemx.pdb
+C:\dev\mcp\src\mp4shader\Gemx\obj\Debug\net8.0\Gemx.GeneratedMSBuildEditorConfig.editorconfig
+C:\dev\mcp\src\mp4shader\Gemx\obj\Debug\net8.0\Gemx.AssemblyInfoInputs.cache
+C:\dev\mcp\src\mp4shader\Gemx\obj\Debug\net8.0\Gemx.AssemblyInfo.cs
+C:\dev\mcp\src\mp4shader\Gemx\obj\Debug\net8.0\Gemx.csproj.CoreCompileInputs.cache
+C:\dev\mcp\src\mp4shader\Gemx\obj\Debug\net8.0\Gemx.dll
+C:\dev\mcp\src\mp4shader\Gemx\obj\Debug\net8.0\refint\Gemx.dll
+C:\dev\mcp\src\mp4shader\Gemx\obj\Debug\net8.0\Gemx.pdb
+C:\dev\mcp\src\mp4shader\Gemx\obj\Debug\net8.0\ref\Gemx.dll
