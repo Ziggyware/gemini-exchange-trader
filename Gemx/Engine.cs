@@ -39,11 +39,12 @@ public struct EngineView
     public byte BlockFlags;
     public long IntendedBid8, IntendedAsk8;
     public long Base8, RecvNs, BestBid8, BestAsk8, BidQuote8, AskQuote8, Pos8, LagNs, MaxLagSeenNs;
+    public long BestBidQty8, BestAskQty8;
     public long BidSentNs, AskSentNs;
     public long Frames, Fails, Cmds, Fills, Trips, Divergences;
     public long LastFillPx8;
     public int ResyncMd, Samples;
-    public double Micro, Sigma2, OfiNorm, CashUsd;
+    public double Micro, Mid, Sigma2, OfiNorm, CashUsd, AvgSize;
     public Slot BidSlot, AskSlot;
     public bool Breaker, Quoting, IsHealthy, Warm, Killed, KillSent, FlushPending, FlushOk, LastFillSell;
 }
@@ -64,7 +65,7 @@ public sealed class Engine
     LagGauge _lag;
     Leg _bid, _ask;
     bool _haveTick, _breaker, _posKnown, _baseSet, _killSent, _flushOk, _lastFillSell;
-    long _breakerUntil, _lastTickNs, _lagExcess, _bestBid8, _bestAsk8, _base8, _lastFillNs, _flushReq, _req;
+    long _breakerUntil, _lastTickNs, _lagExcess, _bestBid8, _bestAsk8, _bestBidQty8, _bestAskQty8, _base8, _lastFillNs, _flushReq, _req;
     long _killReq, _killRetryNs, _intBid8, _intAsk8, _lastFillPx8;
     byte _blk;
     int _faults, _rejects;
@@ -110,6 +111,8 @@ public sealed class Engine
             RecvNs = ns,
             BestBid8 = _bestBid8,
             BestAsk8 = _bestAsk8,
+            BestBidQty8 = _bestBidQty8,
+            BestAskQty8 = _bestAskQty8,
             IntendedBid8 = _intBid8,
             IntendedAsk8 = _intAsk8,
             BlockFlags = _blk,
@@ -133,7 +136,9 @@ public sealed class Engine
             ResyncMd = ResyncMd,
             Samples = _s.Samples,
             Micro = _s.Micro,
+            Mid = _s.Mid,
             Sigma2 = _s.Sigma2,
+            AvgSize = _s.AvgSize,
             OfiNorm = _s.OfiNorm,
             BidSlot = _bid.S,
             AskSlot = _ask.S,
@@ -228,6 +233,8 @@ public sealed class Engine
         _lastTickNs = ns;
         _bestBid8 = m.BidPx;
         _bestAsk8 = m.AskPx;
+        _bestBidQty8 = m.BidQty;
+        _bestAskQty8 = m.AskQty;
         _s.OnTicker(ns, m.BidPx * 1e-8, m.BidQty * 1e-8, m.AskPx * 1e-8, m.AskQty * 1e-8);
         _haveTick = true;
         Think(ns);

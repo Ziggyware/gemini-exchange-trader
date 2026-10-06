@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Gemx — maker terminal (design preview)</title>
+<style>
+  :root{
+    --bg:#090C11; --panel:#0F131A; --card:#141922; --cardtop:#181E29; --raise:#1E2633; --hover:#263040;
+    --line:#242E3D; --linesoft:#1B232F; --linebright:#3A485E;
+    --hi:#E9EFF7; --tx:#ACB8C8; --dim:#788597; --faint:#535F71;
+    --accent:#38BDF8; --accentdeep:#0E74B2; --violet:#A78BFA;
+    --up:#22C55E; --upl:#4ADE80; --down:#EF4444; --downl:#F87171;
+    --warn:#FBBF24; --danger:#F43F5E; --info:#60A5FA; --neutral:#718094;
+    --mono:"Consolas","SFMono-Regular",Menlo,monospace;
+    --ui:"Segoe UI",Inter,system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--tx);font-family:var(--ui);font-size:13px;
+       display:flex;align-items:center;justify-content:center;padding:10px}
+  .app{width:min(1560px,100%);height:min(970px,100%);min-height:640px;background:var(--bg);
+       border:1px solid var(--linesoft);display:flex;flex-direction:column;overflow:hidden;position:relative}
+
+  /* ---------- title ---------- */
+  .title{height:48px;display:flex;align-items:center;gap:10px;padding:0 8px 0 6px;flex:0 0 48px}
+  .badge{width:22px;height:22px;flex:0 0 22px;background:linear-gradient(180deg,#7dd3fc,#0e74b2);
+         clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%);display:grid;place-items:center;position:relative}
+  .badge i{display:block;width:2px;height:11px;background:rgba(255,255,255,.92);margin-left:-4px}
+  .badge i+i{height:8px;margin:0 0 0 2px}
+  .word{font-weight:700;font-size:17px;letter-spacing:.16em;color:var(--hi)}
+  .sym{display:flex;align-items:center;gap:7px;border:1px solid var(--line);background:rgba(30,38,51,.82);
+       border-radius:5px;padding:2px 10px 2px 8px;font-family:var(--mono);font-size:11px;color:var(--hi)}
+  .sym b{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px rgba(56,189,248,.18)}
+  .sub{font-size:9px;letter-spacing:.14em;font-weight:700;color:var(--faint)}
+  .chip{display:flex;align-items:center;gap:8px;border-radius:999px;padding:4px 14px;
+        border:1px solid rgba(74,222,128,.55);background:linear-gradient(180deg,rgba(34,197,94,.20),rgba(34,197,94,.06));
+        color:#d9f5e2;font-weight:700;font-size:11px;letter-spacing:.06em}
+  .chip .dot{width:9px;height:9px;border-radius:50%;background:var(--upl);box-shadow:0 0 0 5px rgba(74,222,128,.20);
+             animation:breathe 2.4s ease-in-out infinite}
+  .chip small{font-family:var(--mono);font-size:10px;color:#9fd7b4;font-weight:400}
+  @keyframes breathe{0%,100%{transform:scale(.86)}50%{transform:scale(1)}}
+  .spacer{flex:1}
+  .btn{display:flex;align-items:center;gap:6px;height:26px;padding:0 12px;border-radius:6px;font-size:11px;font-weight:700;
+       border:1px solid var(--line);background:linear-gradient(180deg,#232d3c,#161c26);color:var(--hi);cursor:default;
+       box-shadow:inset 0 1px 0 rgba(255,255,255,.10),0 2px 6px rgba(0,0,0,.5)}
+  .btn.primary{border-color:rgba(74,222,128,.7);background:linear-gradient(180deg,#22c55e,#12703a);color:#f2fff7}
+  .btn.danger{border-color:rgba(248,113,113,.7);background:linear-gradient(180deg,#ef4444,#8e1f22);color:#fff2f4}
+  .btn.ghost{background:linear-gradient(180deg,#1d2532,#12171f);color:var(--tx)}
+
+  /* ---------- layout ---------- */
+  .body{flex:1;display:flex;min-height:0;gap:0}
+  .rail{width:344px;flex:0 0 344px;padding:2px 6px 6px;display:flex;flex-direction:column;gap:9px;overflow:hidden}
+  .main{flex:1;display:flex;min-width:0;padding:6px}
+  .right{width:348px;flex:0 0 348px;padding:6px 6px 6px 0;display:flex;flex-direction:column;gap:9px;min-height:0}
+
+  .card{background:var(--card);border:1px solid var(--linesoft);border-radius:9px;overflow:hidden;
+        display:flex;flex-direction:column;box-shadow:0 2px 8px rgba(0,0,0,.55)}
+  .card>header{display:flex;align-items:center;gap:7px;padding:6px 10px;background:linear-gradient(180deg,rgba(56,189,248,.13),rgba(56,189,248,0));
+               border-bottom:1px solid rgba(27,35,47,.9);flex:0 0 auto}
+  .card>header .ic{width:17px;height:17px;border-radius:5px;display:grid;place-items:center;background:linear-gradient(180deg,rgba(56,189,248,.86),rgba(56,189,248,.43));
+                   color:#eafaff;font-size:10px}
+  .card h2{margin:0;font-size:9px;letter-spacing:.16em;color:var(--hi);font-weight:700}
+  .card header .cap{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--dim)}
+  .card .body{padding:7px 10px 9px;display:flex;flex-direction:column;gap:6px}
+
+  .tile{display:flex;gap:8px;align-items:flex-start}
+  .tile .railbar{width:2.4px;border-radius:2px;background:var(--up);align-self:stretch;margin-top:2px}
+  .tile .col{flex:1;min-width:0}
+  .tile .hd{font-size:9px;letter-spacing:.14em;font-weight:700;color:var(--dim)}
+  .tile .hd em{font-style:normal;color:var(--faint);margin-left:6px;font-weight:400;letter-spacing:.1em}
+  .tile .val{font-family:var(--mono);font-size:21px;font-weight:700;color:var(--hi);line-height:1.12;margin-top:1px}
+  .tile .val.up{color:var(--upl)} .tile .val.dn{color:var(--downl)}
+  .tile .cap{font-family:var(--mono);font-size:9.5px;color:var(--faint);margin-top:2px}
+  .spark{width:104px;height:34px;flex:0 0 104px;margin-top:8px}
+
+  /* inventory gauge */
+  .gauge{position:relative;height:52px}
+  .gauge .ends{display:flex;justify-content:space-between;font-size:9px;font-weight:700;letter-spacing:.12em}
+  .gauge .ends .l{color:var(--downl)} .gauge .ends .r{color:var(--upl)}
+  .gtrack{position:absolute;left:0;right:0;top:16px;height:11px;border-radius:6px;background:#070a0e;
+          border:1px solid rgba(36,46,61,.9);overflow:hidden}
+  .gtrack .dzone{position:absolute;top:0;bottom:0;width:10%;background:rgba(239,68,68,.14)}
+  .gtrack .dzone.l{left:0} .gtrack .dzone.r{right:0}
+  .gtrack .ticks{position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0 11.6%,rgba(36,46,61,.85) 11.6% 12.1%)}
+  .gfill{position:absolute;top:16px;height:11px;border-radius:6px;background:linear-gradient(90deg,#15803d,#4ade80)}
+  .gmid{position:absolute;top:12px;height:19px;width:1px;background:rgba(58,72,94,.95)}
+  .gflag{position:absolute;top:30px;padding:1px 6px;border-radius:4px;background:#0b1a12;border:1px solid rgba(74,222,128,.6);
+         font-family:var(--mono);font-size:10px;color:#b9f3cd;transform:translateX(-50%)}
+  .gflag:after{content:"";position:absolute;left:50%;top:-4px;transform:translateX(-50%);
+               border-left:3px solid transparent;border-right:3px solid transparent;border-bottom:4px solid rgba(74,222,128,.6)}
+  .gfoot{position:absolute;bottom:0;left:0;right:0;display:flex;justify-content:space-between;
+         font-family:var(--mono);font-size:9.5px;color:var(--faint)}
+
+  .stats{display:grid;gap:4px 10px}
+  .stats.c2{grid-template-columns:1fr 1fr}
+  .stats.c3{grid-template-columns:1fr 1fr 1fr}
+  .stat{border-left:1px solid rgba(27,35,47,.9);padding-left:9px;min-width:0}
+  .stat:first-child{border-left:0;padding-left:0}
+  .stat .k{font-size:9px;letter-spacing:.11em;color:var(--faint)}
+  .stat .v{font-family:var(--mono);font-size:11.5px;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  /* quote rows */
+  .qrow{display:flex;align-items:center;gap:9px;height:34px;border-bottom:1px solid rgba(27,35,47,.9)}
+  .side{width:38px;flex:0 0 38px;height:15px;border-radius:4px;display:grid;place-items:center;font-size:9px;font-weight:700;letter-spacing:.08em;
+        border:1px solid rgba(34,197,94,.72);background:linear-gradient(180deg,rgba(34,197,94,.24),rgba(34,197,94,.09));color:#b7f0c9}
+  .side.sell{border-color:rgba(239,68,68,.72);background:linear-gradient(180deg,rgba(239,68,68,.24),rgba(239,68,68,.09));color:#f7c2c2}
+  .px{font-family:var(--mono);font-size:15px;font-weight:700;color:var(--hi);letter-spacing:.02em}
+  .pill{margin-left:auto;border-radius:999px;padding:1px 9px;font-family:var(--mono);font-size:10px;
+        border:1px solid rgba(74,222,128,.55);background:rgba(74,222,128,.16);color:#c8f7d8}
+  .pill.send{border-color:rgba(96,165,250,.6);background:rgba(96,165,250,.16);color:#cfe4ff}
+  .dist{display:flex;flex-direction:column;gap:3px;width:86px;flex:0 0 86px;align-items:stretch}
+  .dist .n{font-family:var(--mono);font-size:9.5px;color:var(--dim);text-align:right}
+  .dbar{height:5px;border-radius:3px;background:rgba(7,10,14,.85);position:relative;overflow:hidden}
+  .dbar i{position:absolute;inset:0 auto 0 0;background:var(--up);opacity:.72;border-radius:3px}
+  .dbar b{position:absolute;top:50%;width:5px;height:5px;border-radius:50%;background:#eafff2;transform:translate(-50%,-50%)}
+
+  /* meters */
+  .meter{display:flex;flex-direction:column;gap:5px}
+  .meter .row{display:flex;align-items:baseline;justify-content:space-between;font-size:9px;letter-spacing:.12em;font-weight:700;color:var(--dim)}
+  .meter .row .v{font-family:var(--mono);letter-spacing:0;font-weight:400;color:var(--upl)}
+  .meter .row .n{font-family:var(--mono);font-size:9.5px;color:var(--faint);letter-spacing:0;margin-left:auto;margin-right:8px;font-weight:400}
+  .mtrack{height:8px;border-radius:4px;background:#070a0e;border:1px solid rgba(36,46,61,.75);position:relative;overflow:hidden}
+  .mfill{position:absolute;inset:0 auto 0 0;border-radius:4px}
+  .mtrack .seg{position:absolute;inset:1px 1px 1px 1px;background:repeating-linear-gradient(90deg,transparent 0 9.6%,rgba(9,12,17,.85) 9.6% 10%)}
+
+  /* ---------- charts ---------- */
+  .chartwrap{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0;min-height:0}
+  .tabs{display:flex;align-items:center;gap:8px;height:30px}
+  .segbar{display:flex;background:#0c1015;border:1px solid var(--linesoft);border-radius:7px;padding:3px;gap:2px}
+  .seg{font-size:9.5px;font-weight:700;letter-spacing:.08em;color:var(--dim);padding:3px 12px;border-radius:6px;display:flex;align-items:center;gap:6px}
+  .seg.on{color:var(--hi);background:linear-gradient(180deg,#28323f,#191f29);border:1px solid rgba(56,189,248,.5);position:relative}
+  .seg.on:after{content:"";position:absolute;left:6px;right:6px;bottom:1px;height:2px;border-radius:2px;background:var(--accent)}
+  .seg .live{width:5px;height:5px;border-radius:50%;background:var(--upl);box-shadow:0 0 0 3px rgba(74,222,128,.18)}
+  .tabs .cap{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--faint)}
+  .chartcard{flex:1;background:var(--card);border:1px solid var(--linesoft);border-radius:9px;position:relative;overflow:hidden;min-height:0;
+             box-shadow:0 2px 8px rgba(0,0,0,.55)}
+  .chartcard svg{position:absolute;inset:0;width:100%;height:100%}
+  .legend{position:absolute;left:12px;top:8px;display:flex;gap:14px;font-family:var(--mono);font-size:10px;color:var(--dim);align-items:center;z-index:3}
+  .legend i{display:inline-block;width:14px;height:2px;vertical-align:middle;margin-right:5px}
+  .headline{position:absolute;right:12px;top:8px;font-family:var(--mono);font-size:11px;color:var(--tx);z-index:3}
+  .readout{position:absolute;left:46%;top:40%;width:206px;border-radius:6px;padding:6px 8px 7px;z-index:4;
+           background:rgba(7,10,14,.94);border:1px solid rgba(36,46,61,.95);box-shadow:0 6px 18px rgba(0,0,0,.6)}
+  .readout .r{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;line-height:1.42}
+  .readout .r span:first-child{color:var(--dim)} .readout .r span:last-child{color:var(--hi)}
+
+  /* ladder */
+  .ladder{flex:1;display:flex;flex-direction:column;font-family:var(--mono);font-size:11px;min-height:0}
+  .lhead,.lrow{display:grid;grid-template-columns:40% 22% 1fr;align-items:center;padding:0 2px}
+  .lhead{height:15px;font-size:9px;font-family:var(--ui);letter-spacing:.1em;color:var(--faint)}
+  .lrow{height:18px;position:relative;border-bottom:1px solid rgba(27,35,47,.35)}
+  .lrow .p{text-align:right;padding-right:6px;font-size:11px}
+  .lrow .s{text-align:right;padding-right:6px;font-size:10.5px;color:var(--dim)}
+  .lrow .b{height:13px;border-radius:3px;margin-left:2px}
+  .lrow.ask .p{color:#f0a9a9} .lrow.bid .p{color:#a6e9bf}
+  .lrow.ours{background:rgba(34,197,94,.10)}
+  .lrow .ours-tag{position:absolute;right:2px;top:3px;font-size:9px;border:1px solid rgba(74,222,128,.6);background:rgba(74,222,128,.16);
+                  color:#c8f7d8;border-radius:3px;padding:0 4px;font-family:var(--mono)}
+  .spread{margin:6px 0;border:1px solid rgba(36,46,61,.95);border-radius:6px;background:#0a0e13;padding:6px 8px;position:relative;height:52px}
+  .spread .t{font-size:9px;letter-spacing:.12em;color:var(--faint)}
+  .spread .v{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--hi);margin-left:34px;margin-top:-10px}
+  .spread .m{font-family:var(--mono);font-size:10px;color:var(--dim);margin-left:130px;margin-top:-13px}
+  .spread .mid{position:absolute;right:8px;top:5px;text-align:right;font-family:var(--mono);font-size:10px}
+  .spread .imb{position:absolute;left:8px;bottom:8px;height:4px;width:88px;border-radius:2px;background:#070a0e;overflow:hidden;display:flex}
+  .spread .imb i{display:block;height:100%}
+  .spread .imbt{position:absolute;left:104px;bottom:5px;font-family:var(--mono);font-size:9.5px;color:var(--dim)}
+
+  /* tape */
+  .tape{flex:1;overflow:hidden;font-family:var(--mono);font-size:11px;min-height:0}
+  .trow{display:grid;grid-template-columns:64px 52px 88px 62px 1fr;align-items:center;height:19px;position:relative;padding-left:6px}
+  .trow:before{content:"";position:absolute;left:0;top:2px;bottom:2px;width:2.5px;border-radius:2px;background:var(--neutral);opacity:.5}
+  .trow.f:before{background:var(--up)} .trow.s:before{background:var(--down)}
+  .trow.k:before{background:var(--danger)} .trow.a:before{background:var(--warn)} .trow.o:before{background:var(--info)}
+  .trow .tm{color:var(--faint);font-size:10px}
+  .trow .tag{justify-self:start;font-size:9.5px;border-radius:3.5px;padding:1px 5px;border:1px solid rgba(113,128,148,.6);background:rgba(113,128,148,.16);color:var(--tx)}
+  .trow.f .tag{border-color:rgba(34,197,94,.7);background:rgba(34,197,94,.18);color:#b7f0c9}
+  .trow.s .tag{border-color:rgba(239,68,68,.7);background:rgba(239,68,68,.18);color:#f7c2c2}
+  .trow.k .tag{border-color:rgba(244,63,94,.7);background:rgba(244,63,94,.18);color:#ffc9d4}
+  .trow.a .tag{border-color:rgba(251,191,36,.7);background:rgba(251,191,36,.18);color:#ffe6ac}
+  .trow.o .tag{border-color:rgba(96,165,250,.7);background:rgba(96,165,250,.18);color:#cfe4ff}
+  .trow .pr{text-align:right;color:var(--tx);font-size:10.5px}
+  .trow .qt{text-align:right;color:var(--dim);font-size:10px}
+  .trow .nt{color:var(--tx);font-family:var(--ui);font-size:11.5px;padding-left:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .flash{animation:flash 1.1s ease-out}
+  @keyframes flash{from{background:rgba(56,189,248,.22)}to{background:transparent}}
+
+  /* log + status */
+  .logstrip{height:158px;flex:0 0 158px;background:var(--card);border:1px solid var(--linesoft);border-radius:9px;display:flex;flex-direction:column;overflow:hidden}
+  .logbar{display:flex;align-items:center;gap:4px;height:26px;padding:0 5px;border-bottom:1px solid var(--linesoft);flex:0 0 26px}
+  .logbar .cap{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--faint)}
+  .log{flex:1;overflow:hidden;font-family:var(--mono);font-size:11px;padding:4px 8px;line-height:1.5;color:var(--tx)}
+  .log .t{color:var(--faint)} .log .g{color:var(--upl)} .log .w{color:var(--warn)} .log .e{color:var(--downl)} .log .i{color:var(--info)}
+  .statusbar{height:26px;flex:0 0 26px;display:flex;align-items:center;gap:5px;padding:0 6px}
+  .sp{display:flex;align-items:center;gap:6px;height:20px;border-radius:5px;padding:0 8px;font-size:9px;font-weight:700;letter-spacing:.1em;
+      border:1px solid rgba(74,222,128,.45);background:linear-gradient(180deg,rgba(74,222,128,.16),rgba(15,19,26,.85));color:#d7f7e3}
+  .sp b{width:6px;height:6px;border-radius:50%;background:var(--upl)}
+  .sp .v{font-family:var(--mono);font-size:10px;font-weight:400;color:var(--tx);margin-left:2px}
+  .sp.warn{border-color:rgba(251,191,36,.5);color:#ffe9b8} .sp.warn b{background:var(--warn)}
+  .sp.bad{border-color:rgba(248,113,113,.5);color:#ffd3d3} .sp.bad b{background:var(--downl)}
+  .sp.idle{border-color:rgba(113,128,148,.4);color:var(--dim)} .sp.idle b{background:var(--neutral)}
+  .statusbar .right{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+  .note{position:absolute;left:50%;bottom:6px;transform:translateX(-50%);font-size:10px;color:var(--faint);font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="title">
+    <div class="badge"><i></i><i></i></div>
+    <div class="word">GEMX</div>
+    <div class="sym"><b></b>BTCUSD</div>
+    <div class="chip"><span class="dot"></span>QUOTING <small id="chipDetail">bid 96,412.44 · ask 96,412.86</small></div>
+    <div class="spacer"></div>
+    <div class="btn primary">▶ Start</div>
+    <div class="btn ghost">■ Stop</div>
+    <div class="btn danger">☠ Kill</div>
+    <div class="btn ghost">⚙ Settings</div>
+  </div>
+
+  <div class="body">
+    <!-- ============ left rail ============ -->
+    <aside class="rail">
+      <section class="card">
+        <header><span class="ic">◔</span><h2>POSITION</h2><span class="cap">−0.000240 · 24% of limit</span></header>
+        <div class="body">
+          <div class="tile">
+            <span class="railbar" style="background:var(--up)"></span>
+            <div class="col">
+              <div class="hd">NET POSITION <em>BTC</em></div>
+              <div class="val" id="posVal">-0.000240</div>
+              <div class="cap">limit ±0.001000 · quote 0.000100</div>
+            </div>
+            <svg class="spark" viewBox="0 0 104 34" preserveAspectRatio="none" id="sparkPos"></svg>
+          </div>
+          <div class="gauge">
+            <div class="ends"><span class="l">◀ SHORT</span><span class="r">LONG ▶</span></div>
+            <div class="gtrack">
+              <div class="dzone l"></div><div class="dzone r"></div>
+              <div class="ticks"></div>
+            </div>
+            <div class="gfill" id="gaugeFill"></div>
+            <div class="gmid" style="left:50%"></div>
+            <div class="gflag" id="gaugeFlag" style="left:38%">-0.000240</div>
+            <div class="gfoot"><span>-0.001000</span><span>+0.001000</span></div>
+          </div>
+          <div class="stats c2">
+            <div class="stat"><div class="k">BASE</div><div class="v" id="baseVal">0.012500</div></div>
+            <div class="stat"><div class="k">AVG ENTRY</div><div class="v" id="avgEntry">96,404.12</div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <header><span class="ic" style="background:linear-gradient(180deg,rgba(56,189,248,.86),rgba(56,189,248,.43))">◎</span><h2>PERFORMANCE</h2><span class="cap">cash + inventory at micro</span></header>
+        <div class="body">
+          <div class="tile">
+            <span class="railbar" style="background:var(--accent)"></span>
+            <div class="col">
+              <div class="hd">MARK-TO-MARKET P&amp;L <em>USD</em></div>
+              <div class="val up" id="pnlVal">+$3.42</div>
+              <div class="cap" id="pnlCap">cash +$0.86 · mark 96,412.63</div>
+            </div>
+            <svg class="spark" viewBox="0 0 104 34" preserveAspectRatio="none" id="sparkPnl"></svg>
+          </div>
+          <div class="stats c3">
+            <div class="stat"><div class="k">CASH</div><div class="v" style="color:var(--upl)">+$0.86</div></div>
+            <div class="stat"><div class="k">MICRO</div><div class="v" id="microVal">96,412.63</div></div>
+            <div class="stat"><div class="k">MID</div><div class="v" style="color:var(--dim)" id="midVal">96,412.65</div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <header><span class="ic" style="background:linear-gradient(180deg,rgba(167,139,250,.86),rgba(167,139,250,.43))">≡</span><h2>LIVE QUOTES</h2><span class="cap">requote 2t</span></header>
+        <div class="body" style="gap:0">
+          <div class="qrow">
+            <span class="side">BUY</span>
+            <span class="px" id="ourBid">96,410.20</span>
+            <span class="dist"><span class="n" id="bidDist">Δ 3t</span><span class="dbar"><i id="bidBar" style="width:25%"></i><b id="bidDot" style="left:25%"></b></span></span>
+            <span class="pill" id="bidPill">LIVE 1.2s</span>
+          </div>
+          <div class="qrow" style="border-bottom:0">
+            <span class="side sell">SELL</span>
+            <span class="px" id="ourAsk">96,414.30</span>
+            <span class="dist"><span class="n" id="askDist">Δ 2t</span><span class="dbar"><i id="askBar" style="width:17%;background:var(--down)"></i><b id="askDot" style="left:17%"></b></span></span>
+            <span class="pill send" id="askPill">SENDING</span>
+          </div>
+          <div class="stats c2" style="margin-top:9px">
+            <div class="stat"><div class="k">SPREAD</div><div class="v" id="spreadVal">0.42 4t</div></div>
+            <div class="stat"><div class="k">OUR EDGE</div><div class="v" id="edgeVal">3t / 2t</div></div>
+            <div class="stat"><div class="k">MAKER FEE</div><div class="v" style="color:var(--dim)">0.00 bp</div></div>
+            <div class="stat"><div class="k">MIN EDGE</div><div class="v" style="color:var(--dim)">0.0100</div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <header><span class="ic" style="background:linear-gradient(180deg,rgba(251,191,36,.86),rgba(251,191,36,.43))">∿</span><h2>SIGNALS</h2></header>
+        <div class="body" style="gap:9px">
+          <div class="meter">
+            <div class="row"><span>ORDER-FLOW IMBALANCE</span><span class="v" id="ofiTxt" style="color:var(--upl)">+0.284</span><span class="n" id="ofiNote">bid heavy</span></div>
+            <div class="mtrack"><div class="mfill" id="ofiFill" style="width:64%;background:linear-gradient(180deg,#4ade80,#15803d)"></div><div class="seg"></div></div>
+          </div>
+          <div class="meter">
+            <div class="row"><span>VOLATILITY SIGMA</span><span class="v" style="color:var(--violet)" id="sigTxt">0.0193 /√s</span><span class="n">10 ticks = 0.01</span></div>
+            <div class="mtrack"><div class="mfill" id="sigFill" style="width:53%;background:linear-gradient(180deg,#c4b5fd,#7c5cf0)"></div><div class="seg"></div></div>
+          </div>
+          <div class="meter">
+            <div class="row"><span>FEED LAG EXCESS</span><span class="v" id="lagTxt" style="color:var(--upl)">1.84 ms</span><span class="n">max 100.0 ms</span></div>
+            <div class="mtrack"><div class="mfill" id="lagFill" style="width:9%;background:linear-gradient(180deg,#4ade80,#15803d)"></div><div class="seg"></div></div>
+          </div>
+          <div class="meter">
+            <div class="row"><span>WARM-UP</span><span class="v" style="color:var(--upl)">50 / 50</span><span class="n">100%</span></div>
+            <div class="mtrack"><div class="mfill" style="width:100%;background:linear-gradient(180deg,#4ade80,#15803d)"></div><div class="seg"></div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" style="flex:0 1 auto">
+        <header><span class="ic" style="background:linear-gradient(180deg,rgba(113,128,148,.86),rgba(113,128,148,.43))">▤</span><h2>DIAGNOSTICS</h2><span class="cap">252.4k frames · 1.1k cmds</span></header>
+        <div class="body">
+          <div class="stats c2" style="gap:8px 10px">
+            <div class="stat"><div class="k">FRAMES</div><div class="v">252.4k</div></div>
+            <div class="stat"><div class="k">RATE</div><div class="v">10.0 /s</div></div>
+            <div class="stat"><div class="k">PARSE FAULTS</div><div class="v" style="color:var(--dim)">0</div></div>
+            <div class="stat"><div class="k">COMMANDS</div><div class="v">1.1k</div></div>
+            <div class="stat"><div class="k">FILLS</div><div class="v" style="color:var(--upl)">37</div></div>
+            <div class="stat"><div class="k">BREAKER TRIPS</div><div class="v" style="color:var(--dim)">0</div></div>
+            <div class="stat"><div class="k">MD RESYNCS</div><div class="v" style="color:var(--dim)">0</div></div>
+            <div class="stat"><div class="k">DIVERGENCES</div><div class="v" style="color:var(--dim)">0</div></div>
+          </div>
+        </div>
+      </section>
+    </aside>
+
+    <!-- ============ centre ============ -->
+    <main class="main" style="flex-direction:column;gap:6px">
+      <div class="tabs">
+        <div class="segbar">
+          <span class="seg on"><span class="live"></span>FLOW</span>
+          <span class="seg">1M</span><span class="seg">5M</span><span class="seg">15M</span><span class="seg">30M</span>
+          <span class="seg">1H</span><span class="seg">1D</span><span class="seg">1W</span><span class="seg">1M</span>
+        </div>
+        <div class="btn ghost" style="height:24px">◎ Fit</div>
+        <div class="btn ghost" style="height:24px">⧉ Snapshot</div>
+        <span class="cap">quote flow · wheel zoom, drag pan, hover for the readout</span>
+      </div>
+
+      <div class="chartcard">
+        <svg id="flow" preserveAspectRatio="none"></svg>
+        <div class="legend">
+          <span><i style="background:var(--up)"></i>best bid</span>
+          <span><i style="background:var(--down)"></i>best ask</span>
+          <span><i style="background:var(--upl);height:3px"></i>our bid</span>
+          <span><i style="background:var(--downl);height:3px"></i>our ask</span>
+          <span><i style="background:linear-gradient(90deg,transparent 50%,#4ade80 50%,#4ade80 100%);background-size:6px 2px"></i>intent</span>
+          <span><i style="background:var(--violet)"></i>micro</span>
+        </div>
+        <div class="headline" id="headline">spread 0.42   4t   mid 96,412.65   30s window</div>
+        <div class="readout">
+          <div class="r"><span>time</span><span id="roTime">14:22:07</span></div>
+          <div class="r"><span>best bid</span><span id="roBid">96,412.44</span></div>
+          <div class="r"><span>best ask</span><span id="roAsk">96,412.86</span></div>
+          <div class="r"><span>spread</span><span id="roSpread">0.42  4t</span></div>
+          <div class="r"><span>our bid</span><span id="roQb">96,410.20</span></div>
+          <div class="r"><span>our ask</span><span id="roQa">96,414.30</span></div>
+          <div class="r"><span>intent</span><span id="roIntent">96,410.10 / 96,414.40</span></div>
+          <div class="r"><span>micro</span><span id="roMicro">96,412.63</span></div>
+          <div class="r"><span>lag</span><span id="roLag">1.84 ms</span></div>
+        </div>
+      </div>
+
+      <div class="logstrip">
+        <div class="logbar">
+          <div class="btn ghost" style="height:20px;padding:0 9px">∿ Log</div>
+          <div class="btn ghost" style="height:20px;padding:0 9px">⧉ Copy</div>
+          <div class="btn ghost" style="height:20px;padding:0 9px">⌫ Clear</div>
+          <div class="btn ghost" style="height:20px;padding:0 9px">⌄ Follow</div>
+          <span class="cap" id="logCount">6 lines</span>
+        </div>
+        <div class="log" id="logBox">
+          <div><span class="t">14:21:58.204</span> <span class="i">orders: subscribed to orders@account, balances@account</span></div>
+          <div><span class="t">14:21:58.181</span> <span class="g">md: subscribed to btcusd@bookTicker</span></div>
+          <div><span class="t">14:21:58.096</span> <span>started BTCUSD priceTick8=100000 qtyStep8=10000 minQty8=10000 epoch=3728</span></div>
+          <div><span class="t">14:22:03.771</span> <span class="g">fill buy 96,410.20 x1 → pos -0.000240</span></div>
+          <div><span class="t">14:22:05.510</span> <span class="w">quote stale 4.2s — cancel and replace</span></div>
+          <div><span class="t">14:22:07.118</span> <span class="g">ack order.place 200 (cid z3728…c1)</span></div>
+        </div>
+      </div>
+    </main>
+
+    <!-- ============ right dock ============ -->
+    <aside class="right">
+      <section class="card" style="flex:1.4;min-height:0">
+        <header><span class="ic" style="background:linear-gradient(180deg,rgba(96,165,250,.86),rgba(96,165,250,.43))">≣</span><h2>DEPTH</h2><span class="cap">6 lvls · ticker + depth</span></header>
+        <div class="body" style="padding:6px 8px 8px;min-height:0">
+          <div class="ladder" id="ladder">
+            <div class="lhead"><span style="text-align:right;padding-right:6px">PRICE</span><span style="text-align:right;padding-right:6px">SIZE</span><span>DEPTH</span></div>
+            <!-- rows injected -->
+          </div>
+        </div>
+      </section>
+      <section class="card" style="flex:1;min-height:0">
+        <header><span class="ic">∿</span><h2>ACTIVITY</h2><span class="cap">newest first</span></header>
+        <div class="body" style="padding:4px 0 0;min-height:0">
+          <div class="tape" id="tape">
+            <div class="trow f"><span class="tm">14:22:03.771</span><span class="tag">BUY</span><span class="pr">96,410.20</span><span class="qt">0.0001</span><span class="nt">position -0.000240</span></div>
+            <div class="trow o"><span class="tm">14:22:03.744</span><span class="tag">PLACE</span><span class="pr">96,410.20</span><span class="qt">0.0001</span><span class="nt">bid requote 3t from touch</span></div>
+            <div class="trow s"><span class="tm">14:22:03.702</span><span class="tag">SELL</span><span class="pr">96,414.30</span><span class="qt">0.0001</span><span class="nt">filled ask leg</span></div>
+            <div class="trow a"><span class="tm">14:22:01.219</span><span class="tag">SYNC</span><span class="pr"></span><span class="qt"></span><span class="nt">market data resync #1 (depth gap)</span></div>
+            <div class="trow o"><span class="tm">14:22:00.884</span><span class="tag">CXL</span><span class="pr">96,410.30</span><span class="qt">0.0001</span><span class="nt">cancel sent — target moved 2t</span></div>
+            <div class="trow f"><span class="tm">14:21:59.402</span><span class="tag">SELL</span><span class="pr">96,414.28</span><span class="qt">0.0001</span><span class="nt">position -0.000140</span></div>
+            <div class="trow o"><span class="tm">14:21:58.930</span><span class="tag">BOOT</span><span class="pr"></span><span class="qt"></span><span class="nt">session started on BTCUSD @ api.gemini.com</span></div>
+          </div>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <div class="statusbar">
+    <span class="sp"><b></b>WARM<span class="v">50/50</span></span>
+    <span class="sp warn"><b></b>POS<span class="v">24%</span></span>
+    <span class="sp"><b></b>LAG<span class="v" id="pillLag">1.8ms</span></span>
+    <span class="sp"><b></b>BOOK<span class="v">4t</span></span>
+    <span class="sp"><b></b>HEALTH<span class="v">ok</span></span>
+    <span class="sp"><b></b>KILL<span class="v">armed</span></span>
+    <span class="sp"><b></b>MD<span class="v">open</span></span>
+    <span class="sp"><b></b>ORDERS<span class="v">open</span></span>
+    <span class="right" id="clock">14:22:07 · up 5m 12s · 10.0 fr/s · md open · orders open</span>
+  </div>
+  <div class="note">static design preview of the WinForms layout — not the running application</div>
+</div>
+
+<script>
+// ------------------------------------------------------------------ simulated feed
+const S = { mid: 96412.65, micro: 96412.63, bid: 96412.44, ask: 96412.86, tick: 0.1, pos: -0.00024,
+            cash: 0.86, lag: 1.84, ofi: 0.284, sigma: 0.0193, n: 0, bid8: 9641020, ask8: 9641430 };
+const series = { bb: [], ba: [], qb: [], qa: [], ib: [], ia: [], mc: [], lag: [] };
+const N = 300;
+const rnd = (a,b)=>a+Math.random()*(b-a);
+const f2 = v => v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+for (let i=0;i<N;i++){ push(true); }
+function push(init){
+  S.n++;
+  if(!init){
+    S.mid += rnd(-0.35,0.35) + (Math.random()<0.02 ? rnd(-1.2,1.2) : 0);
+    S.bid = Math.round((S.mid - rnd(0.15,0.35))/S.tick)*S.tick;
+    S.ask = Math.round((S.mid + rnd(0.15,0.35))/S.tick)*S.tick;
+    S.micro = S.mid + rnd(-0.12,0.12);
+    S.lag = Math.max(0.2, S.lag*0.82 + Math.random()*rnd(0.4,6.2));
+    S.ofi = Math.max(-1,Math.min(1, S.ofi*0.93 + rnd(-0.16,0.16)));
+    S.sigma = Math.max(0.004, S.sigma*0.96 + Math.random()*0.0016);
+    if (Math.random() < 0.12){
+      const q = rnd(0.005,0.02);
+      S.pos += (Math.random()<0.5?-1:1)*q;
+      S.cash += (Math.random()<0.5?1:-1)*q*(S.mid/100)*rnd(0.4,1.8);
+      addFill();
+    }
+    const requote = Math.random() < 0.15;
+    S.bid8 = Math.round((S.bid - rnd(0.3,1.4))/S.tick)*S.tick;
+    S.ask8 = Math.round((S.ask + rnd(0.3,1.4))/S.tick)*S.tick;
+  } else {
+    S.bid8 = Math.round((S.bid - 0.9)/S.tick)*S.tick;
+    S.ask8 = Math.round((S.ask + 1.2)/S.tick)*S.tick;
+  }
+  series.bb.push(S.bid); series.ba.push(S.ask);
+  series.qb.push(S.bid8); series.qa.push(S.ask8);
+  series.ib.push(Math.round((S.bid8-0.1)/S.tick)*S.tick); series.ia.push(Math.round((S.ask8+0.1)/S.tick)*S.tick);
+  series.mc.push(S.micro); series.lag.push(S.lag);
+  for (const k in series) if (series[k].length > N) series[k].shift();
+}
+
+// ------------------------------------------------------------------ chart
+const svg = document.getElementById('flow');
+const NS = 'http://www.w3.org/2000/svg';
+const el = (n,attrs)=>{const e=document.createElementNS(NS,n);for(const k in attrs)e.setAttribute(k,attrs[k]);return e;};
+function path(arr, y, x0, dx, step){
+  let d='', open=false;
+  arr.forEach((v,i)=>{
+    const px = x0 + i*dx, py = y(v);
+    if(!open){ d += `M${px.toFixed(1)},${py.toFixed(1)}`; open=true; }
+    else if(step){ d += `L${px.toFixed(1)},${py.toFixed(1)}`; }
+    else d += `L${px.toFixed(1)},${py.toFixed(1)}`;
+  });
+  return d;
+}
+function drawChart(){
+  const r = svg.getBoundingClientRect();
+  const W = Math.max(320, r.width), H = Math.max(200, r.height);
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const padL=10, padR=78, top=26, axis=17, lagH=46;
+  const plot = {x:padL, y:top, w:W-padL-padR, h:H-top-axis-lagH-10};
+  const lagRect = {x:padL, y:plot.y+plot.h+6, w:plot.w, h:lagH};
+
+  let lo=Infinity, hi=-Infinity;
+  for (let i=0;i<N;i++){ [series.bb[i],series.ba[i],series.qb[i],series.qa[i],series.ib[i],series.ia[i]].forEach(v=>{ if(v<lo)lo=v; if(v>hi)hi=v; }); }
+  const span = (hi-lo)||1; lo -= span*0.10; hi += span*0.10;
+  const Y = v => plot.y + plot.h - (v-lo)/(hi-lo)*plot.h;
+  const dx = plot.w/(N-1);
+
+  svg.appendChild(el('rect',{x:plot.x,y:plot.y,width:plot.w,height:plot.h,rx:4,fill:'rgba(0,0,0,.05)',stroke:'rgba(27,35,47,.55)'}));
+
+  // price grid
+  const stepPx = span/9;
+  for(let i=0;i<=9;i++){
+    const v = lo + i*stepPx, y = Y(v);
+    svg.appendChild(el('line',{x1:plot.x,x2:plot.x+plot.w,y1:y,y2:y,stroke:'rgba(27,35,47,.55)','stroke-width':1}));
+    svg.appendChild(el('line',{x1:plot.x+plot.w,x2:plot.x+plot.w+3,y1:y,y2:y,stroke:'rgba(36,46,61,.7)'}));
+    const t = el('text',{x:plot.x+plot.w+6,y:y+3.5,fill:'#535F71','font-size':'10px','font-family':'Consolas,monospace'});
+    t.textContent = v.toFixed(2); svg.appendChild(t);
+  }
+  // time grid
+  for(let i=N-1;i>=0;i-=60){
+    const x = plot.x + i*dx;
+    svg.appendChild(el('line',{x1:x,x2:x,y1:plot.y,y2:plot.y+plot.h,stroke:'rgba(27,35,47,.5)'}));
+    const t = el('text',{x:x,y:plot.y+plot.h+13,fill:'#535F71','font-size':'10px','font-family':'Consolas,monospace','text-anchor':'middle'});
+    t.textContent = i===N-1 ? 'now' : `-${Math.round((N-1-i)/10)}s`;
+    svg.appendChild(t);
+  }
+  // spread band
+  let d='';
+  for(let i=0;i<N;i++) d += (i?'L':'M') + (plot.x+i*dx).toFixed(1) + ',' + Y(series.bb[i]).toFixed(1);
+  for(let i=N-1;i>=0;i--) d += 'L' + (plot.x+i*dx).toFixed(1) + ',' + Y(series.ba[i]).toFixed(1);
+  svg.appendChild(el('path',{d:d+'Z',fill:'rgba(56,189,248,.13)',stroke:'none'}));
+
+  const line = (arr,stroke,w,step,dash) => {
+    const p = el('path',{d:path(arr,Y,plot.x,dx,step),fill:'none',stroke,['stroke-width']:w,'stroke-linejoin':'round','stroke-linecap':'round'});
+    if (dash) p.setAttribute('stroke-dasharray',dash);
+    svg.appendChild(p);
+  };
+  // soft glow under the market lines
+  line(series.bb,'rgba(34,197,94,.14)',4,false); line(series.ba,'rgba(239,68,68,.14)',4,false);
+  line(series.bb,'#22C55E',1.2,false); line(series.ba,'#EF4444',1.2,false);
+  line(series.mc,'#A78BFA',1,false,'1 3');
+  line(series.ib,'rgba(74,222,128,.5)',1,true,'4 4'); line(series.ia,'rgba(248,113,113,.5)',1,true,'4 4');
+  line(series.qb,'rgba(74,222,128,.16)',7,true); line(series.qa,'rgba(248,113,113,.16)',7,true);
+  line(series.qb,'#4ADE80',2.2,true); line(series.qa,'#F87171',2.2,true);
+
+  // live heads
+  const hx = plot.x+(N-1)*dx;
+  [[series.qb[N-1],'#4ADE80'],[series.qa[N-1],'#F87171']].forEach(([v,c])=>{
+    svg.appendChild(el('circle',{cx:hx,cy:Y(v),r:7,fill:c,opacity:.16}));
+    svg.appendChild(el('circle',{cx:hx,cy:Y(v),r:2.6,fill:c}));
+  });
+
+  // right gutter tags
+  const tags = [[series.bb[N-1],'#22C55E','BID '],[series.ba[N-1],'#EF4444','ASK '],
+                [series.qb[N-1],'#4ADE80','OUR '],[series.qa[N-1],'#F87171','OUR ']];
+  tags.sort((a,b)=>Y(a[0])-Y(b[0]));
+  let lastY = -99;
+  tags.forEach(([v,c,label])=>{
+    let y = Math.max(Y(v)-7.5, lastY+2); lastY = y;
+    const g = el('g',{});
+    g.appendChild(el('rect',{x:plot.x+plot.w+4,y:y,width:padR-8,height:15,rx:3,fill:c,opacity:.22,stroke:c,'stroke-opacity':.8}));
+    g.appendChild(el('rect',{x:plot.x+plot.w+4,y:y+3,width:2.5,height:9,fill:c}));
+    const t = el('text',{x:plot.x+plot.w+10,y:y+11,fill:'#E9EFF7','font-size':'10px','font-family':'Consolas,monospace'});
+    t.textContent = label+v.toFixed(2); g.appendChild(t);
+    const conn = el('line',{x1:hx,y1:Y(v),x2:plot.x+plot.w+4,y2:y+7.5,stroke:c,'stroke-opacity':.35,'stroke-dasharray':'2 3'});
+    svg.appendChild(conn); svg.appendChild(g);
+  });
+
+  // lag pane
+  svg.appendChild(el('rect',{x:lagRect.x,y:lagRect.y,width:lagRect.w,height:lagRect.h,rx:4,fill:'rgba(0,0,0,.09)',stroke:'rgba(27,35,47,.6)'}));
+  const lhi = Math.max(100*1.5, Math.max(...series.lag));
+  const LY = v => lagRect.y + lagRect.h - 4 - (v/lhi)*(lagRect.h-14);
+  let d2 = path(series.lag, LY, plot.x, dx, false);
+  d2 += `L${(plot.x+(N-1)*dx).toFixed(1)},${lagRect.y+lagRect.h-3}L${plot.x},${lagRect.y+lagRect.h-3}Z`;
+  svg.appendChild(el('path',{d:d2,fill:'rgba(251,191,36,.16)',stroke:'none'}));
+  svg.appendChild(el('path',{d:path(series.lag,LY,plot.x,dx,false),fill:'none',stroke:'#FBBF24','stroke-width':1.2}));
+  const ty = LY(100);
+  svg.appendChild(el('line',{x1:lagRect.x+2,x2:lagRect.x+lagRect.w-2,y1:ty,y2:ty,stroke:'rgba(244,63,94,.85)','stroke-dasharray':'4 4'}));
+  const lt = el('text',{x:lagRect.x+6,y:lagRect.y+11,fill:'#535F71','font-size':'10px','font-family':'Consolas,monospace','letter-spacing':'1px'});
+  lt.textContent='FEED LAG'; svg.appendChild(lt);
+  const lv = el('text',{x:lagRect.x+lagRect.w-8,y:lagRect.y+11,fill:'#4ADE80','font-size':'11px','font-family':'Consolas,monospace','text-anchor':'end'});
+  lv.textContent = `${series.lag[N-1].toFixed(2)} ms   peak ${Math.max(...series.lag).toFixed(1)} ms`;
+  svg.appendChild(lv);
+  svg.appendChild(el('circle',{cx:plot.x+(N-1)*dx,cy:LY(series.lag[N-1]),r:3.4,fill:'#4ADE80',opacity:.25}));
+  svg.appendChild(el('circle',{cx:plot.x+(N-1)*dx,cy:LY(series.lag[N-1]),r:2,fill:'#4ADE80'}));
+}
+
+// ------------------------------------------------------------------ ladder
+function drawLadder(){
+  const spread = (S.ask - S.bid);
+  const bQty = [], aQty = [];
+  for(let i=0;i<6;i++){ aQty.push(rnd(0.004,0.05)); bQty.push(rnd(0.004,0.05)); }
+  const maxQ = Math.max(...aQty, ...bQty);
+  const host = document.getElementById('ladder');
+  host.innerHTML = `<div class="lhead"><span style="text-align:right;padding-right:6px">PRICE</span><span style="text-align:right;padding-right:6px">SIZE</span><span>DEPTH</span></div>`;
+  for (let i=5;i>=0;i--){
+    const px = S.ask + i*S.tick, w = (aQty[i]/maxQ*100).toFixed(0);
+    const ours = Math.abs(px - S.ask8) < S.tick/2;
+    host.insertAdjacentHTML('beforeend',
+      `<div class="lrow ask${ours?' ours':''}"><span class="p">${f2(px)}</span><span class="s">${aQty[i].toFixed(4)}</span>
+       <span class="b" style="width:${w}%;background:linear-gradient(90deg,rgba(239,68,68,.14),rgba(239,68,68,.42))"></span>${ours?'<span class="ours-tag">OURS</span>':''}</div>`);
+  }
+  const sb=0, sa=0;
+  host.insertAdjacentHTML('beforeend',
+    `<div class="spread">
+       <div class="t">SPREAD</div>
+       <div class="v">${spread.toFixed(2)}</div>
+       <div class="m">4t · ${(spread/S.mid*10000).toFixed(2)}bp</div>
+       <div class="mid"><div style="color:#535F71;font-size:9px">MID</div><div style="color:#ACB8C8">${f2((S.bid+S.ask)/2)}</div>
+         <div style="color:#4ADE80;font-size:9.5px">${(S.micro-(S.bid+S.ask)/2>=0?'+':'-')}${Math.abs(S.micro-(S.bid+S.ask)/2).toFixed(2)} (${((S.micro-(S.bid+S.ask)/2)/S.tick).toFixed(2)}t)</div></div>
+       <div class="imb"><i style="width:56%;background:rgba(34,197,94,.75)"></i><i style="width:44%;background:rgba(239,68,68,.75)"></i></div>
+       <div class="imbt">imb 12% · 0.09 vs 0.07</div>
+     </div>`);
+  for (let i=0;i<6;i++){
+    const px = S.bid - i*S.tick, w = (bQty[i]/maxQ*100).toFixed(0);
+    const ours = Math.abs(px - S.bid8) < S.tick/2;
+    host.insertAdjacentHTML('beforeend',
+      `<div class="lrow bid${ours?' ours':''}"><span class="p">${f2(px)}</span><span class="s">${bQty[i].toFixed(4)}</span>
+       <span class="b" style="width:${w}%;background:linear-gradient(90deg,rgba(34,197,94,.14),rgba(34,197,94,.42))"></span>${ours?'<span class="ours-tag">OURS</span>':''}</div>`);
+  }
+}
+drawLadder();
+
+// ------------------------------------------------------------------ tick
+let tapeCount = 1;
+function addFill(){
+  if (document.hidden) return;
+  const sell = Math.random() < 0.5;
+  const row = document.createElement('div');
+  row.className = 'trow ' + (sell?'s':'f') + ' flash';
+  row.innerHTML = `<span class="tm">${new Date().toTimeString().slice(0,8)}.${String(Math.floor(Math.random()*999)).padStart(3,'0')}</span>
+    <span class="tag">${sell?'SELL':'BUY'}</span><span class="pr">${f2(S.mid)}</span>
+    <span class="qt">0.0001</span><span class="nt">position ${S.pos.toFixed(6)}</span>`;
+  const tape = document.getElementById('tape');
+  tape.insertBefore(row, tape.firstChild);
+  while (tape.children.length > 14) tape.removeChild(tape.lastChild);
+  const log = document.getElementById('logBox');
+  const line = document.createElement('div');
+  line.innerHTML = `<span class="t">${new Date().toTimeString().slice(0,8)}</span> <span class="g">fill ${sell?'sell':'buy'} ${f2(S.mid)} x1 → pos ${S.pos.toFixed(6)}</span>`;
+  log.appendChild(line);
+  while (log.children.length > 7) log.removeChild(log.firstChild);
+  document.getElementById('logCount').textContent = (6 + (++tapeCount)) + ' lines';
+}
+function spark(id, arr, color){
+  const s = document.getElementById(id);
+  s.innerHTML = '';
+  const lo = Math.min(...arr), hi = Math.max(...arr), sp = (hi-lo)||1;
+  const pts = arr.map((v,i)=>[i/(arr.length-1)*104, 33 - (v-lo)/sp*30]);
+  const d = pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+','+p[1].toFixed(1)).join('');
+  s.insertAdjacentHTML('beforeend',`<path d="${d}L104,34L0,34Z" fill="${color}22" stroke="none"/>`);
+  s.insertAdjacentHTML('beforeend',`<path d="${d}" fill="none" stroke="${color}" stroke-width="1.3"/>`);
+  const last = pts[pts.length-1];
+  s.insertAdjacentHTML('beforeend',`<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.6" fill="${color}" opacity=".25"/>`);
+  s.insertAdjacentHTML('beforeend',`<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="1.6" fill="${color}"/>`);
+}
+const posHist = [S.pos], pnlHist = [3.4];
+
+function tick(){
+  push(false);
+  const pnl = S.cash + S.pos*S.micro;
+  posHist.push(S.pos); if(posHist.length>60) posHist.shift();
+  pnlHist.push(pnl); if(pnlHist.length>60) pnlHist.shift();
+
+  document.getElementById('posVal').textContent = S.pos.toFixed(6);
+  document.getElementById('pnlVal').textContent = (pnl>=0?'+':'−') + '$' + Math.abs(pnl).toFixed(2);
+  document.getElementById('pnlVal').className = 'val ' + (pnl>=0?'up':'dn');
+  document.getElementById('pnlCap').textContent = `cash ${S.cash>=0?'+':'−'}$${Math.abs(S.cash).toFixed(2)} · mark ${f2(S.micro)}`;
+  document.getElementById('microVal').textContent = f2(S.micro);
+  document.getElementById('midVal').textContent = f2((S.bid+S.ask)/2);
+  document.getElementById('baseVal').textContent = (0.0125 - S.pos).toFixed(6);
+  document.getElementById('avgEntry').textContent = f2(S.mid - 7.4);
+  document.getElementById('ourBid').textContent = f2(S.bid8);
+  document.getElementById('ourAsk').textContent = f2(S.ask8);
+  const d1 = ((S.bid - S.bid8)/S.tick), d2 = ((S.ask8 - S.ask)/S.tick);
+  document.getElementById('bidDist').textContent = 'Δ ' + d1.toFixed(0) + 't';
+  document.getElementById('askDist').textContent = 'Δ ' + d2.toFixed(0) + 't';
+  document.getElementById('bidBar').style.width = Math.min(100,d1/12*100) + '%';
+  document.getElementById('bidDot').style.left = Math.min(100,d1/12*100) + '%';
+  document.getElementById('askBar').style.width = Math.min(100,d2/12*100) + '%';
+  document.getElementById('askDot').style.left = Math.min(100,d2/12*100) + '%';
+  document.getElementById('bidPill').textContent = 'LIVE ' + (1 + Math.random()).toFixed(1) + 's';
+  document.getElementById('askPill').textContent = Math.random()<0.3 ? 'SENDING' : 'LIVE ' + (0.4+Math.random()).toFixed(1) + 's';
+  document.getElementById('spreadVal').textContent = (S.ask-S.bid).toFixed(2) + ' ' + ((S.ask-S.bid)/S.tick).toFixed(0) + 't';
+  document.getElementById('edgeVal').textContent = d1.toFixed(0) + 't / ' + d2.toFixed(0) + 't';
+  document.getElementById('headline').textContent = `spread ${(S.ask-S.bid).toFixed(2)}   ${((S.ask-S.bid)/S.tick).toFixed(0)}t   mid ${f2((S.bid+S.ask)/2)}   30s window`;
+  document.getElementById('chipDetail').textContent = `bid ${f2(S.bid)} · ask ${f2(S.ask)}`;
+  document.getElementById('pillLag').textContent = S.lag.toFixed(1) + 'ms';
+
+  // meters
+  const ofiN = (S.ofi+1)/2;
+  document.getElementById('ofiTxt').textContent = (S.ofi>0?'+':'−') + Math.abs(S.ofi).toFixed(3);
+  document.getElementById('ofiTxt').style.color = S.ofi>0.3?'#4ADE80':S.ofi<-0.3?'#F87171':'#718094';
+  document.getElementById('ofiFill').style.width = (ofiN*100).toFixed(0)+'%';
+  document.getElementById('ofiFill').style.background = S.ofi>0.3?'linear-gradient(180deg,#4ade80,#15803d)':S.ofi<-0.3?'linear-gradient(180deg,#f87171,#8e1f22)':'linear-gradient(180deg,#8b98aa,#4b5563)';
+  document.getElementById('ofiNote').textContent = S.ofi>0.3?'bid heavy':S.ofi<-0.3?'ask heavy':'balanced';
+  document.getElementById('sigTxt').textContent = S.sigma.toFixed(4) + ' /√s';
+  document.getElementById('sigFill').style.width = Math.min(100, S.sigma/0.04*100).toFixed(0)+'%';
+  document.getElementById('lagTxt').textContent = S.lag.toFixed(2) + ' ms';
+  document.getElementById('lagTxt').style.color = S.lag>100?'#F87171':S.lag>50?'#FBBF24':'#4ADE80';
+  document.getElementById('lagFill').style.width = Math.min(100, S.lag/150*100).toFixed(0)+'%';
+  document.getElementById('lagFill').style.background = S.lag>100?'linear-gradient(180deg,#f87171,#8e1f22)':S.lag>50?'linear-gradient(180deg,#fbbf24,#8a5f0b)':'linear-gradient(180deg,#4ade80,#15803d)';
+
+  // gauge
+  const norm = Math.max(-1,Math.min(1, S.pos/0.001));
+  const x = 50 + norm*46;
+  document.getElementById('gaugeFlag').style.left = x + '%';
+  document.getElementById('gaugeFlag').textContent = S.pos.toFixed(6);
+  const f = document.getElementById('gaugeFill');
+  f.style.left = Math.min(50,x) + '%';
+  f.style.width = Math.abs(norm)*46 + '%';
+  f.style.background = norm>0 ? 'linear-gradient(90deg,#15803d,#4ade80)' : 'linear-gradient(90deg,#f87171,#8e1f22)';
+  const gflag = document.getElementById('gaugeFlag');
+  gflag.style.borderColor = Math.abs(norm)>0.9?'rgba(248,113,113,.7)':'rgba(74,222,128,.6)';
+  gflag.style.color = Math.abs(norm)>0.9?'#ffd3d3':'#b9f3cd';
+
+  // readout
+  const t = new Date().toTimeString().slice(0,8);
+  document.getElementById('roTime').textContent = t;
+  document.getElementById('roBid').textContent = f2(S.bid);
+  document.getElementById('roAsk').textContent = f2(S.ask);
+  document.getElementById('roSpread').textContent = `${(S.ask-S.bid).toFixed(2)}  ${((S.ask-S.bid)/S.tick).toFixed(0)}t`;
+  document.getElementById('roQb').textContent = f2(S.bid8);
+  document.getElementById('roQa').textContent = f2(S.ask8);
+  document.getElementById('roMicro').textContent = f2(S.micro);
+  document.getElementById('roIntent').textContent = `${f2(S.bid8-0.1)} / ${f2(S.ask8+0.1)}`;
+  document.getElementById('roLag').textContent = S.lag.toFixed(2) + ' ms';
+  document.getElementById('clock').textContent = `${t} · up 5m ${12+Math.floor(S.n/600)}s · 10.0 fr/s · md open · orders open`;
+
+  spark('sparkPos', posHist, '#22C55E');
+  spark('sparkPnl', pnlHist, pnl>=0?'#38BDF8':'#F87171');
+  drawChart();
+  if (S.n % 8 === 0) drawLadder();
+}
+setInterval(tick, 260);
+setTimeout(tick, 60);
+window.addEventListener('resize', drawChart);
+</script>
+</body>
+</html>
