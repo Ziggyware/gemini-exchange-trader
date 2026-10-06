@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Gemx.App")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+9424feb24b0b58380038e4711e72324a44492fd6")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+04af3f2c777ec661aa452733326f896c51bb1dcf")]
 [assembly: System.Reflection.AssemblyProductAttribute("Gemx.App")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Gemx.App")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
