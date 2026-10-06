@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 
 namespace Gemx.App;
 
@@ -13,39 +14,79 @@ public struct Candle
 
 public sealed class Aggregator
 {
-    public void LoadHistory(TF tf, List<Candle> hist)
-    {
-        _books[tf] = hist.TakeLast(500).ToList();
-        if (hist.Count > 0) _cur[tf] = hist.Last(); // start live from last close
-    }
+    static readonly TF[] Tfs = Enum.GetValues<TF>();
 
     readonly Dictionary<TF, List<Candle>> _books = new();
     readonly Dictionary<TF, Candle> _cur = new();
+
     public Aggregator()
     {
-        foreach(TF tf in Enum.GetValues<TF>()) { _books[tf]=new List<Candle>(500); _cur[tf]=new Candle(); }
+        foreach (TF tf in Tfs) { _books[tf] = new List<Candle>(500); _cur[tf] = new Candle(); }
     }
+
     public IReadOnlyList<Candle> Get(TF tf) => _books[tf];
     public Candle Current(TF tf) => _cur[tf];
+
+    // W1 starts Monday 00:00 UTC and M1_30D starts on the 1st of the calendar month, matching CandleHistory.Aggregate*.
+    static long StartNs(TF tf, long ns)
+    {
+        long sec = ns / 1_000_000_000L;
+        if (tf == TF.W1)
+        {
+            long day = sec / 86400;               // epoch day 0 is a Thursday
+            return (day - (day + 3) % 7) * 86400L * 1_000_000_000L;
+        }
+        if (tf == TF.M1_30D)
+        {
+            var d = DateTimeOffset.FromUnixTimeSeconds(sec);
+            return new DateTimeOffset(d.Year, d.Month, 1, 0, 0, 0, TimeSpan.Zero).ToUnixTimeSeconds() * 1_000_000_000L;
+        }
+        long span = (long)tf * 1_000_000_000L;
+        return ns / span * span;
+    }
+
+    public void LoadHistory(TF tf, List<Candle> hist)
+    {
+        var book = new List<Candle>(500);
+        if (hist.Count > 0)
+        {
+            int n = hist.Count - 1;                // the newest history candle becomes the live slot, not a book entry
+            int s = Math.Max(0, n - 500);
+            book.AddRange(hist.GetRange(s, n - s));
+            Candle last = hist[n];
+            _cur.TryGetValue(tf, out Candle c);
+            if (c.Ticks > 0 && c.StartNs > last.StartNs) book.Add(last);   // live data already moved past it
+            else
+            {
+                if (c.Ticks > 0 && c.StartNs == last.StartNs)
+                {
+                    last.H = Math.Max(last.H, c.H);
+                    last.L = Math.Min(last.L, c.L);
+                    last.C = c.C;
+                }
+                _cur[tf] = last;
+            }
+        }
+        _books[tf] = book;
+    }
 
     public void Push(long recvNs, double micro)
     {
         if (micro <= 0) return;
         if (recvNs <= 0) recvNs = Gemx.Clock.NowNs();
-        foreach(TF tf in Enum.GetValues<TF>())
+        foreach (TF tf in Tfs)
         {
-            long span = (long)tf * 1_000_000_000L;
-            long start = recvNs / span * span;
-            ref var cur = ref System.Runtime.InteropServices.CollectionsMarshal.GetValueRefOrAddDefault(_cur, tf, out _);
-            if (cur.StartNs!= start)
+            long start = StartNs(tf, recvNs);
+            ref Candle cur = ref CollectionsMarshal.GetValueRefOrAddDefault(_cur, tf, out _);
+            if (cur.StartNs != start)
             {
-                if (cur.StartNs!= 0 && cur.Ticks>0) { var b=_books[tf]; b.Add(cur); if(b.Count>500) b.RemoveAt(0); }
-                cur = new Candle{ StartNs=start, O=micro, H=micro, L=micro, C=micro, Ticks=1 };
+                if (cur.StartNs != 0 && cur.Ticks > 0) { var b = _books[tf]; b.Add(cur); if (b.Count > 500) b.RemoveAt(0); }
+                cur = new Candle { StartNs = start, O = micro, H = micro, L = micro, C = micro, Ticks = 1 };
             }
             else
             {
-                if (cur.Ticks==0) cur = new Candle{ StartNs=start, O=micro, H=micro, L=micro, C=micro, Ticks=1 };
-                else { if(micro>cur.H) cur.H=micro; if(micro<cur.L) cur.L=micro; cur.C=micro; cur.Ticks++; }
+                if (cur.Ticks == 0) cur = new Candle { StartNs = start, O = micro, H = micro, L = micro, C = micro, Ticks = 1 };
+                else { if (micro > cur.H) cur.H = micro; if (micro < cur.L) cur.L = micro; cur.C = micro; cur.Ticks++; }
             }
         }
     }
@@ -61,134 +102,154 @@ public sealed class CandleStrip : Control
     int _offset = 0; // pan
     Point _dragStart;
     bool _dragging;
-    static readonly Color Bull = Color.FromArgb(90,200,120), Bear = Color.FromArgb(220,80,80), Bg=Color.FromArgb(18,20,25);
+    static readonly Color Bull = Color.FromArgb(90, 200, 120), Bear = Color.FromArgb(220, 80, 80), Bg = Color.FromArgb(18, 20, 25);
+    static readonly SolidBrush BullB = new(Bull), BearB = new(Bear);
+    static readonly Pen BullP = new(Bull), BearP = new(Bear), GridP = new(Color.FromArgb(35, 38, 45));
+    static readonly Font Small = new("Consolas", 7.5f), Mid = new("Consolas", 8f), Bold = new("Consolas", 8f, FontStyle.Bold);
 
-    public CandleStrip(TF tf){ _tf=tf; DoubleBuffered=true; MinimumSize=new Size(120,80);
-        MouseWheel+=OnWheel; MouseDown+=OnDown; MouseMove+=OnMove; MouseUp+=OnUp; DoubleClick+=OnDbl;
+    public CandleStrip(TF tf)
+    {
+        _tf = tf; DoubleBuffered = true; MinimumSize = new Size(120, 80);
+        MouseWheel += OnWheel; MouseDown += OnDown; MouseMove += OnMove; MouseUp += OnUp; DoubleClick += OnDbl;
+        MouseEnter += (_, _) => Focus();   // MouseWheel is only delivered to the focused control
     }
 
-    public void SetData(IReadOnlyList<Candle> hist, Candle live, int dec){ _hist=hist; _live=live; _dec=dec; Invalidate(); }
+    public void SetData(IReadOnlyList<Candle> hist, Candle live, int dec) { _hist = hist; _live = live; _dec = dec; Invalidate(); }
 
-    void OnWheel(object? s, MouseEventArgs e){ _visible = Math.Clamp(_visible + (e.Delta>0?-10:10), 10, 300); Invalidate(); }
-    void OnDown(object? s, MouseEventArgs e){ _dragging=true; _dragStart=e.Location; Cursor=Cursors.SizeWE; }
-    void OnMove(object? s, MouseEventArgs e){ if(!_dragging) return; int dx=_dragStart.X- e.X; int step = Width / Math.Max(1,_visible); if(Math.Abs(dx)>step){ _offset=Math.Max(0,_offset - Math.Sign(dx)); _dragStart=e.Location; Invalidate(); } }
-    void OnUp(object? s, MouseEventArgs e){ _dragging=false; Cursor=Cursors.Default; }
-    void OnDbl(object? s, EventArgs e){ _visible=80; _offset=0; Invalidate(); }
+    void OnWheel(object? s, MouseEventArgs e) { _visible = Math.Clamp(_visible + (e.Delta > 0 ? -10 : 10), 10, 300); Invalidate(); }
+    void OnDown(object? s, MouseEventArgs e) { _dragging = true; _dragStart = e.Location; Cursor = Cursors.SizeWE; }
+    void OnMove(object? s, MouseEventArgs e)
+    {
+        if (!_dragging) return;
+        int dx = _dragStart.X - e.X;
+        int step = Width / Math.Max(1, _visible);
+        if (Math.Abs(dx) > step)
+        {
+            int max = Math.Max(0, _hist.Count + 1 - _visible);
+            _offset = Math.Clamp(_offset - Math.Sign(dx), 0, max);
+            _dragStart = e.Location;
+            Invalidate();
+        }
+    }
+    void OnUp(object? s, MouseEventArgs e) { _dragging = false; Cursor = Cursors.Default; }
+    void OnDbl(object? s, EventArgs e) { _visible = 80; _offset = 0; Invalidate(); }
+
+    Candle At(int i) => i < _hist.Count ? _hist[i] : _live;
 
     protected override void OnPaint(PaintEventArgs e)
     {
-        var g=e.Graphics; g.Clear(Bg); g.SmoothingMode=SmoothingMode.None;
-        var plot = new RectangleF(6, 2, Width-8, Height-20);
+        var g = e.Graphics; g.Clear(Bg); g.SmoothingMode = SmoothingMode.None;
+        var plot = new RectangleF(6, 2, Width - 8, Height - 20);
 
-        // always draw something even with 1 tick
-        var all = new List<Candle>(_hist); if(_live.Ticks>0) all.Add(_live);
-        if(all.Count==0){ using var f=new Font("Consolas",8f); g.DrawString($"{_tf} live {(_live.Ticks>0?_live.C.ToString("F"+_dec):"no ticks yet")}", f, Brushes.Gray, 4,4); g.DrawRectangle(Pens.DimGray, Rectangle.Round(plot)); return; }
-
-        int start = Math.Max(0, all.Count - _visible - _offset);
-        int end = Math.Min(all.Count, start+_visible);
-        var view = all.Skip(start).Take(end - start).ToList(); // oldest -> newest left->right
-
-        if (view.Count==0) view=all.TakeLast(_visible).ToList();
-
-        double lo=view.Min(c=>c.L), hi=view.Max(c=>c.H); double span=hi-lo; if(span<0.01) span=hi*0.001+0.01; lo-=span*0.1; hi+=span*0.1;
-
-        // grid
-        using var gridPen=new Pen(Color.FromArgb(35,38,45));
-        g.DrawLine(gridPen, plot.Left, plot.Top+plot.Height/2, plot.Right, plot.Top+plot.Height/2);
-
-
-        float step = plot.Width / Math.Max(1, view.Count);
-        float bw = Math.Max(2, step * 0.65f);
-        // anchor newest to right edge - time moves left
-        for (int i = 0; i < view.Count; i++)
+        bool hasLive = _live.Ticks > 0;
+        int total = _hist.Count + (hasLive ? 1 : 0);
+        if (total == 0)
         {
-            var c = view[i];
-            // i=0 is oldest in view, i=view.Count-1 is newest/live -> at right
-            float x = plot.Right - (view.Count - 1 - i) * step - step / 2;
-
-
-            float yO=(float)(plot.Bottom - (c.O-lo)/(hi-lo)*plot.Height);
-            float yC=(float)(plot.Bottom - (c.C-lo)/(hi-lo)*plot.Height);
-            float yH=(float)(plot.Bottom - (c.H-lo)/(hi-lo)*plot.Height);
-            float yL=(float)(plot.Bottom - (c.L-lo)/(hi-lo)*plot.Height);
-            bool up=c.C>=c.O;
-            using var br=new SolidBrush(up?Bull:Bear);
-            using var pn=new Pen(br.Color);
-            g.DrawLine(pn, x, yH, x, yL);
-            g.FillRectangle(br, x-bw/2, Math.Min(yO,yC), bw, Math.Max(2, Math.Abs(yO-yC)));
-            if(c.Equals(_live)) g.DrawRectangle(Pens.White, x-bw/2, Math.Min(yO,yC), bw, Math.Max(2, Math.Abs(yO-yC)));
+            g.DrawString($"{_tf} live no ticks yet", Mid, Brushes.Gray, 4, 4);
+            g.DrawRectangle(Pens.DimGray, Rectangle.Round(plot));
+            return;
         }
-        using var font=new Font("Consolas",7.5f);
-        g.DrawString($"{_tf} {view.Count}/{all.Count} [{_visible} vis] wheel=zoom drag=pan dbl=reset", font, Brushes.Gray, 2,2);
-        g.DrawString($"{hi:F2}", font, Brushes.Gray, plot.Right+2, plot.Top);
-        g.DrawString($"{lo:F2}", font, Brushes.Gray, plot.Right+2, plot.Bottom-10);
-        g.DrawString($"{all.Last().C.ToString("F"+_dec)}", new Font("Consolas",8f,FontStyle.Bold), Brushes.White, plot.Left+4, plot.Top+12);
+
+        int start = Math.Max(0, total - _visible - _offset);
+        int end = Math.Min(total, start + _visible);
+        int count = end - start;
+
+        double lo = double.MaxValue, hi = double.MinValue;
+        for (int i = start; i < end; i++)
+        {
+            Candle c = At(i);
+            if (c.L < lo) lo = c.L;
+            if (c.H > hi) hi = c.H;
+        }
+        double span = hi - lo; if (span < 0.01) span = hi * 0.001 + 0.01; lo -= span * 0.1; hi += span * 0.1;
+        double range = hi - lo;
+
+        g.DrawLine(GridP, plot.Left, plot.Top + plot.Height / 2, plot.Right, plot.Top + plot.Height / 2);
+
+        float step = plot.Width / Math.Max(1, count);
+        float bw = Math.Max(2, step * 0.65f);
+        for (int i = start; i < end; i++)
+        {
+            Candle c = At(i);
+            // newest candle anchored to the right edge
+            float x = plot.Right - (end - 1 - i) * step - step / 2;
+            float yO = (float)(plot.Bottom - (c.O - lo) / range * plot.Height);
+            float yC = (float)(plot.Bottom - (c.C - lo) / range * plot.Height);
+            float yH = (float)(plot.Bottom - (c.H - lo) / range * plot.Height);
+            float yL = (float)(plot.Bottom - (c.L - lo) / range * plot.Height);
+            bool up = c.C >= c.O;
+            g.DrawLine(up ? BullP : BearP, x, yH, x, yL);
+            float top = Math.Min(yO, yC), h = Math.Max(2, Math.Abs(yO - yC));
+            g.FillRectangle(up ? BullB : BearB, x - bw / 2, top, bw, h);
+            if (hasLive && i == total - 1) g.DrawRectangle(Pens.White, x - bw / 2, top, bw, h);
+        }
+        g.DrawString($"{_tf} {count}/{total} [{_visible} vis] wheel=zoom drag=pan dbl=reset", Small, Brushes.Gray, 2, 2);
+        g.DrawString($"{hi:F2}", Small, Brushes.Gray, plot.Right + 2, plot.Top);
+        g.DrawString($"{lo:F2}", Small, Brushes.Gray, plot.Right + 2, plot.Bottom - 10);
+        g.DrawString(At(total - 1).C.ToString("F" + _dec), Bold, Brushes.White, plot.Left + 4, plot.Top + 12);
     }
 }
 
 public sealed class MultiTFView : UserControl
 {
-    readonly Aggregator _agg=new();
-    readonly Dictionary<TF, CandleStrip> _strips=new();
+    readonly Aggregator _agg = new();
+    readonly Dictionary<TF, CandleStrip> _strips = new();
+    public Action<string>? Log;
+    int _dec = 2;
+
+    static TableLayoutPanel Row(params CandleStrip[] strips)
+    {
+        var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = strips.Length, RowCount = 1 };
+        for (int i = 0; i < strips.Length; i++)
+        {
+            t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / strips.Length));
+            t.Controls.Add(strips[i], i, 0);
+        }
+        return t;
+    }
+
     public MultiTFView()
     {
-        DoubleBuffered=true;
-        // resizable with nested splitters instead of TableLayout
-        var root = new SplitContainer{ Dock=DockStyle.Fill, Orientation=Orientation.Horizontal, SplitterDistance=300 };
-        var top = new SplitContainer{ Dock=DockStyle.Fill, Orientation=Orientation.Vertical, SplitterDistance=350 };
-        var top2 = new SplitContainer{ Dock=DockStyle.Fill, Orientation=Orientation.Vertical, SplitterDistance=350 };
-        var bot = new SplitContainer{ Dock=DockStyle.Fill, Orientation=Orientation.Vertical, SplitterDistance=350 };
-        var bot2 = new SplitContainer{ Dock=DockStyle.Fill, Orientation=Orientation.Vertical, SplitterDistance=350 };
+        DoubleBuffered = true;
+        foreach (TF tf in new[] { TF.M1, TF.M5, TF.M15, TF.M30, TF.H1, TF.D1, TF.W1, TF.M1_30D })
+            _strips[tf] = new CandleStrip(tf) { Dock = DockStyle.Fill };
 
-        // top row: M1 | M5 | M15 | M30
-        var m1=new CandleStrip(TF.M1){Dock=DockStyle.Fill}; var m5=new CandleStrip(TF.M5){Dock=DockStyle.Fill};
-        var m15=new CandleStrip(TF.M15){Dock=DockStyle.Fill}; var m30=new CandleStrip(TF.M30){Dock=DockStyle.Fill};
-        top.Panel1.Controls.Add(m1); top.Panel2.Controls.Add(top2); top2.Panel1.Controls.Add(m5); top2.Panel2.Controls.Add(m15);
-        // hack for 4th - add to form via extra container
-        var topRow = new TableLayoutPanel{Dock=DockStyle.Fill, ColumnCount=4};
-        topRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,25)); topRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,25));
-        topRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,25)); topRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,25));
-        topRow.Controls.Add(m1,0,0); topRow.Controls.Add(m5,1,0); topRow.Controls.Add(m15,2,0); topRow.Controls.Add(m30,3,0);
-
-        var h1=new CandleStrip(TF.H1){Dock=DockStyle.Fill}; var d1=new CandleStrip(TF.D1){Dock=DockStyle.Fill};
-        var w1=new CandleStrip(TF.W1){Dock=DockStyle.Fill}; var mo=new CandleStrip(TF.M1_30D){Dock=DockStyle.Fill};
-        var botRow = new TableLayoutPanel{Dock=DockStyle.Fill, ColumnCount=4};
-        botRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,25)); botRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,25));
-        botRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,25)); botRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,25));
-        botRow.Controls.Add(h1,0,0); botRow.Controls.Add(d1,1,0); botRow.Controls.Add(w1,2,0); botRow.Controls.Add(mo,3,0);
-
-        root.Panel1.Controls.Add(topRow); root.Panel2.Controls.Add(botRow);
+        var root = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal };
+        root.Panel1.Controls.Add(Row(_strips[TF.M1], _strips[TF.M5], _strips[TF.M15], _strips[TF.M30]));
+        root.Panel2.Controls.Add(Row(_strips[TF.H1], _strips[TF.D1], _strips[TF.W1], _strips[TF.M1_30D]));
         Controls.Add(root);
 
-        _strips[TF.M1]=m1; _strips[TF.M5]=m5; _strips[TF.M15]=m15; _strips[TF.M30]=m30;
-        _strips[TF.H1]=h1; _strips[TF.D1]=d1; _strips[TF.W1]=w1; _strips[TF.M1_30D]=mo;
+        // SplitterDistance is validated against the current size, so set it once real layout exists
+        bool split = false;
+        Resize += (_, _) =>
+        {
+            if (!split && root.Height > 120) { root.SplitterDistance = root.Height / 2; split = true; }
+        };
     }
-    public async Task LoadHistoryAsync(string symbol)
+
+    public async Task LoadHistoryAsync(string symbol, int dec)
     {
-        // parallel fetch
-        var tasks = new Dictionary<TF, Task<List<Candle>>>();
-        foreach (TF tf in new[] { TF.M1, TF.M5, TF.M15, TF.M30, TF.H1, TF.D1 })
-            tasks[tf] = CandleHistory.FetchAsync(symbol, CandleHistory.ToGemini(tf));
+        _dec = dec;
+        async Task<List<Candle>> Get(TF tf)
+        {
+            try { return await CandleHistory.FetchAsync(symbol, CandleHistory.ToGemini(tf)); }
+            catch (Exception ex) { Log?.Invoke($"candles {tf}: {ex.Message}"); return new List<Candle>(); }
+        }
 
-        await Task.WhenAll(tasks.Values);
-
-        // fill books
-        _agg.LoadHistory(TF.M1, await tasks[TF.M1]);
-        _agg.LoadHistory(TF.M5, await tasks[TF.M5]);
-        _agg.LoadHistory(TF.M15, await tasks[TF.M15]);
-        _agg.LoadHistory(TF.M30, await tasks[TF.M30]);
-        _agg.LoadHistory(TF.H1, await tasks[TF.H1]);
-        var daily = await tasks[TF.D1];
-        _agg.LoadHistory(TF.D1, daily);
+        TF[] tfs = { TF.M1, TF.M5, TF.M15, TF.M30, TF.H1, TF.D1 };
+        List<Candle>[] res = await Task.WhenAll(tfs.Select(Get));
+        for (int i = 0; i < tfs.Length; i++) _agg.LoadHistory(tfs[i], res[i]);
+        List<Candle> daily = res[5];
         _agg.LoadHistory(TF.W1, CandleHistory.AggregateWeek(daily));
         _agg.LoadHistory(TF.M1_30D, CandleHistory.AggregateMonth(daily));
 
-        // push to strips
-        foreach (var kv in _strips) kv.Value.SetData(_agg.Get(kv.Key), _agg.Current(kv.Key), 2);
+        foreach (var kv in _strips) kv.Value.SetData(_agg.Get(kv.Key), _agg.Current(kv.Key), _dec);
     }
+
     public void Push(long recvNs, double micro, int dec)
     {
+        _dec = dec;
         _agg.Push(recvNs, micro);
-        foreach(var kv in _strips) kv.Value.SetData(_agg.Get(kv.Key), _agg.Current(kv.Key), dec);
+        foreach (var kv in _strips) kv.Value.SetData(_agg.Get(kv.Key), _agg.Current(kv.Key), dec);
     }
 }

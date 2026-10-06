@@ -36,7 +36,7 @@ public sealed class GemxHost
         using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
             spec = await Rest.GetSpec(http, s.Symbol.Trim(), cts.Token, s.RestHost.Trim().TrimEnd('/'));
         EngineConfig cfg = s.ToConfig(spec);
-        
+
         return new GemxHost(s, ep, spec, cfg, key, Encoding.ASCII.GetBytes(secret));
     }
 
@@ -80,6 +80,7 @@ public sealed class GemxHost
     }
 
 
+    // Receives connection-level messages only (exception text); raw frames are never routed here.
     void OnOrdersLog(string m)
     {
         Log("orders: " + m);
@@ -137,7 +138,7 @@ public sealed class GemxHost
             var sw = Stopwatch.StartNew();
             while (sw.ElapsedMilliseconds < 3000)
             {
-                if (Engine.TryReadView(out EngineView v) && v.KillSent && !v.FlushPending) { flushed = true; break; }
+                if (Engine.TryReadView(out EngineView v) && v.FlushOk) { flushed = true; break; }
                 await Task.Delay(20);
             }
         }

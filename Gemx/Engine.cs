@@ -15,7 +15,7 @@ public struct Cmd
 public sealed class EngineConfig
 {
     public QuoteParams Q = new(0.1, 1.5, 1.0, 0, 0, 1, 1);
-    public long QuoteQty8, MaxPos8, MaxNotionalUsd = 1000, Base8;
+    public long QuoteQty8, MaxPos8, MaxNotionalUsd = 1000;
     public long RequoteTicks = 2;
     public long MaxQuoteAgeNs = 5_000_000_000, StaleNs = 500_000_000, MaxLagNs = 100_000_000;
     public long PendingTimeoutNs = 2_000_000_000, BreakerCooldownNs = 10_000_000_000, CoolNs = 5_000_000;
@@ -35,15 +35,17 @@ struct Leg
 
 public struct EngineView
 {
-    public bool BidBlocked, AskBlocked;
-    public string BlockReason;
-    public long IntendedBid8, IntendedAsk8; // add these
+    // BlockFlags: bit0 = bid blocked by risk limits, bit1 = ask blocked
+    public byte BlockFlags;
+    public long IntendedBid8, IntendedAsk8;
     public long Base8, RecvNs, BestBid8, BestAsk8, BidQuote8, AskQuote8, Pos8, LagNs, MaxLagSeenNs;
+    public long BidSentNs, AskSentNs;
     public long Frames, Fails, Cmds, Fills, Trips, Divergences;
-    public int ResyncMd;
-    public double Micro, Sigma2, OfiNorm;
+    public long LastFillPx8;
+    public int ResyncMd, Samples;
+    public double Micro, Sigma2, OfiNorm, CashUsd;
     public Slot BidSlot, AskSlot;
-    public bool Breaker, Quoting, IsHealthy, Warm, Killed, KillSent, FlushPending;
+    public bool Breaker, Quoting, IsHealthy, Warm, Killed, KillSent, FlushPending, FlushOk, LastFillSell;
 }
 
 public sealed class Engine
@@ -56,14 +58,15 @@ public sealed class Engine
     readonly FrameRing? _tap;
     readonly byte[] _tapBuf = new byte[1 << 21];
     readonly L2Book _book = new();
-    // in Engine.cs add at bottom of L2Book class or Engine class:
     public L2Book Book => _book;
-    
+
     readonly Signals _s = new();
     LagGauge _lag;
     Leg _bid, _ask;
-    bool _haveTick, _breaker, _posKnown, _baseSet, _killSent;
+    bool _haveTick, _breaker, _posKnown, _baseSet, _killSent, _flushOk, _lastFillSell;
     long _breakerUntil, _lastTickNs, _lagExcess, _bestBid8, _bestAsk8, _base8, _lastFillNs, _flushReq, _req;
+    long _killReq, _killRetryNs, _intBid8, _intAsk8, _lastFillPx8;
+    byte _blk;
     int _faults, _rejects;
     ulong _seq;
     long _ver;
@@ -71,6 +74,7 @@ public sealed class Engine
 
     public long Base8 => _base8;
     public long Pos8, Frames, Fails, Cmds, Trips, Fills, Divergences, MaxLagSeen;
+    public double CashUsd;
     public ulong CmdHash = 14695981039346656037UL;
     public volatile bool Kill;
     public volatile int ResyncMd;
@@ -106,12 +110,18 @@ public sealed class Engine
             RecvNs = ns,
             BestBid8 = _bestBid8,
             BestAsk8 = _bestAsk8,
-            IntendedBid8 = _view.IntendedBid8,
-            IntendedAsk8 = _view.IntendedAsk8,
+            IntendedBid8 = _intBid8,
+            IntendedAsk8 = _intAsk8,
+            BlockFlags = _blk,
             BidQuote8 = _bid.S == Slot.Idle ? 0 : _bid.Px,
             AskQuote8 = _ask.S == Slot.Idle ? 0 : _ask.Px,
+            BidSentNs = _bid.S == Slot.Idle ? 0 : _bid.SentNs,
+            AskSentNs = _ask.S == Slot.Idle ? 0 : _ask.SentNs,
             Base8 = _base8,
             Pos8 = Pos8,
+            CashUsd = CashUsd,
+            LastFillSell = _lastFillSell,
+            LastFillPx8 = _lastFillPx8,
             LagNs = _lagExcess,
             MaxLagSeenNs = MaxLagSeen,
             Frames = Frames,
@@ -121,6 +131,7 @@ public sealed class Engine
             Trips = Trips,
             Divergences = Divergences,
             ResyncMd = ResyncMd,
+            Samples = _s.Samples,
             Micro = _s.Micro,
             Sigma2 = _s.Sigma2,
             OfiNorm = _s.OfiNorm,
@@ -132,7 +143,8 @@ public sealed class Engine
             Warm = _s.Samples >= _c.WarmupSamples,
             Killed = Kill,
             KillSent = _killSent,
-            FlushPending = _flushReq != 0
+            FlushPending = _flushReq != 0,
+            FlushOk = _flushOk
         };
         long s = _ver;
         Volatile.Write(ref _ver, s + 1);
@@ -178,10 +190,7 @@ public sealed class Engine
 
     public void OnIdle(long ns)
     {
-        if (Kill)
-        {
-            if (!_killSent) { _killSent = true; SendFlush(); }
-        }
+        if (Kill) KillFlush(ns);
         else
         {
             if (_haveTick && ns - _lastTickNs > _c.StaleNs) PullAll(ns);
@@ -189,6 +198,16 @@ public sealed class Engine
             CheckPending(in _ask, ns);
         }
         Publish(ns);
+    }
+
+    // Sends the session cancel once, then retries every 250 ms until a 200 ack for that exact request arrives.
+    void KillFlush(long ns)
+    {
+        if (_flushOk || _flushReq != 0 || ns < _killRetryNs) return;
+        _killSent = true;
+        _killRetryNs = ns + 250_000_000;
+        SendFlush();
+        _killReq = _flushReq;
     }
 
     void CheckPending(in Leg l, long ns)
@@ -223,6 +242,7 @@ public sealed class Engine
             ResyncMd++;
         }
     }
+
     void OnBalance(in Msg m, long ns)
     {
         if (!m.HasBal)
@@ -246,12 +266,14 @@ public sealed class Engine
             Pos8 = want;
         }
     }
+
     void OnOrder(in Msg m, long ns)
     {
         if (m.Cid == 0 || (m.Cid >> 32) != (_c.Epoch & 0xFFFFFFFFUL)) return;
         bool sell = (m.Cid & 1) != 0;
         ref Leg l = ref (sell ? ref _ask : ref _bid);
         bool mine = l.Cid == m.Cid;
+        long fpx = m.LastPx != 0 ? m.LastPx : m.Px != 0 ? m.Px : mine ? l.Px : 0;
         switch (m.St)
         {
             case Status.New:
@@ -265,11 +287,11 @@ public sealed class Engine
                 }
                 break;
             case Status.Partial:
-                Fill(sell, m.Exec, ns);
+                Fill(sell, m.Exec, fpx, ns);
                 if (mine) l.Rem = m.Rem;
                 break;
             case Status.Filled:
-                Fill(sell, m.Exec, ns);
+                Fill(sell, m.Exec, fpx, ns);
                 if (mine) l = default;
                 break;
             case Status.Canceled:
@@ -287,9 +309,13 @@ public sealed class Engine
         }
     }
 
-    void Fill(bool sell, long qty, long ns)
+    void Fill(bool sell, long qty, long px, long ns)
     {
         Pos8 += sell ? -qty : qty;
+        // double: qty8*px8 overflows long (1e6 * 9.5e12 > 9.22e18)
+        CashUsd += (sell ? 1.0 : -1.0) * (qty * 1e-8) * (px * 1e-8);
+        _lastFillSell = sell;
+        _lastFillPx8 = px;
         Fills++;
         _lastFillNs = ns;
     }
@@ -298,8 +324,14 @@ public sealed class Engine
     {
         if (_flushReq != 0 && m.ReqId == _flushReq)
         {
-            if (m.Code == 200) { _bid = default; _ask = default; }
+            long id = _flushReq;
             _flushReq = 0;
+            if (m.Code == 200)
+            {
+                _bid = default;
+                _ask = default;
+                if (id == _killReq) _flushOk = true;
+            }
             return;
         }
         ref Leg l = ref (_bid.ReqId == m.ReqId ? ref _bid : ref _ask);
@@ -320,12 +352,11 @@ public sealed class Engine
     bool Healthy() =>
         _posKnown && _s.Samples >= _c.WarmupSamples && _lagExcess <= _c.MaxLagNs && _bestBid8 > 0 && _bestAsk8 > _bestBid8;
 
-    
     void Think(long ns)
     {
         if (Kill)
         {
-            if (!_killSent) { _killSent = true; SendFlush(); }
+            KillFlush(ns);
             return;
         }
         if (_breaker)
@@ -350,16 +381,13 @@ public sealed class Engine
             }
             if (sb + sa > 0) drift += _c.ImbalanceWeight * (sb - sa) / (sb + sa);
         }
-      
+
         double lagSec = _lagExcess * 1e-9 + _c.RttSec;
         Quoter.Compute(in _c.Q, _s.Micro, drift, _s.Sigma2, Pos8 * 1e-8, lagSec, _bestBid8, _bestAsk8, out long bid8, out long ask8);
 
-        _view.IntendedBid8 = bid8;
-        _view.IntendedAsk8 = ask8;
-        _view.BidBlocked = bid8 > 0 && !Allowed(false, bid8);
-        _view.AskBlocked = ask8 > 0 && !Allowed(true, ask8);
-        _view.BlockReason = _view.AskBlocked ? $"ASK blocked: pos {Pos8 / 1e8:F6} - qty < floor {Math.Max(-_c.MaxPos8, -_base8) / 1e8:F6}" :
-                            _view.BidBlocked ? $"BID blocked" : "";
+        _intBid8 = bid8;
+        _intAsk8 = ask8;
+        _blk = (byte)((bid8 > 0 && !Allowed(false, bid8) ? 1 : 0) | (ask8 > 0 && !Allowed(true, ask8) ? 2 : 0));
 
         Drive(ref _bid, false, bid8, ns);
         Drive(ref _ask, true, ask8, ns);

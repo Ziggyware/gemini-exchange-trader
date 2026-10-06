@@ -65,7 +65,13 @@ public sealed class FeedSocket
                 await Session(ct);
                 backoff = 1100;
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // tell the engine this feed is gone (matters when only the orders token was cancelled)
+                Current = null;
+                _ring.TryWrite(default, Clock.NowNs());
+                break;
+            }
             catch (Exception e) { Log?.Invoke(e.Message); }
             Current = null;
             while (!_ring.TryWrite(default, Clock.NowNs()) && !ct.IsCancellationRequested) await Task.Delay(1, CancellationToken.None);
@@ -93,17 +99,15 @@ public sealed class FeedSocket
             if (len == 0) t0 = Clock.NowNs();
             if (r.MessageType == WebSocketMessageType.Close) break;
             len += r.Count;
-
-            if (len > 0)
+            if (!r.EndOfMessage)
             {
-                // DEBUG: log first 500 chars of every private frame
-                if (_uri.Host.Contains("gemini") && _subs.Any(s => s.Contains("@account")))
-                    Log?.Invoke(Encoding.UTF8.GetString(buf, 0, Math.Min(len, 500)));
-                if (!_ring.TryWrite(buf.AsSpan(0, len), t0)) throw new InvalidOperationException("ring overflow");
-                len = 0;
-                if (_resync != null && _resync() != epoch) throw new InvalidOperationException("resync requested");
+                if (len == buf.Length) throw new InvalidOperationException("frame too large");
+                continue;
             }
-            else if (len == buf.Length) throw new InvalidOperationException("frame too large");
+            if (len == 0) continue; // an empty frame in the ring means "reset"; never forward one from the wire
+            if (!_ring.TryWrite(buf.AsSpan(0, len), t0)) throw new InvalidOperationException("ring overflow");
+            len = 0;
+            if (_resync != null && _resync() != epoch) throw new InvalidOperationException("resync requested");
         }
     }
 }
@@ -254,7 +258,9 @@ public static class Rest
         static double Num(JsonElement e) => e.ValueKind == JsonValueKind.Number ? e.GetDouble() : double.Parse(e.GetString()!, CultureInfo.InvariantCulture);
         long tick = Fixed8.Increment(Num(root.GetProperty("quote_increment")));
         long step = Fixed8.Increment(Num(root.GetProperty("tick_size")));
-        Fixed8.TryParse(Encoding.ASCII.GetBytes(root.GetProperty("min_order_size").GetString()!), out long min);
+        JsonElement mo = root.GetProperty("min_order_size");
+        string mos = mo.ValueKind == JsonValueKind.Number ? mo.GetRawText() : mo.GetString()!;
+        Fixed8.TryParse(Encoding.ASCII.GetBytes(mos), out long min);
         return new SymbolSpec(symbol, tick, step, min);
     }
 }

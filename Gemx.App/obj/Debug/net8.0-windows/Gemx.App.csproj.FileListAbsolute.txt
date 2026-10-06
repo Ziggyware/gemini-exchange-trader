@@ -16,3 +16,4 @@ C:\dev\mcp\src\mp4shader\Gemx.App\obj\Debug\net8.0-windows\refint\Gemx.App.dll
 C:\dev\mcp\src\mp4shader\Gemx.App\obj\Debug\net8.0-windows\Gemx.App.pdb
 C:\dev\mcp\src\mp4shader\Gemx.App\obj\Debug\net8.0-windows\Gemx.App.genruntimeconfig.cache
 C:\dev\mcp\src\mp4shader\Gemx.App\obj\Debug\net8.0-windows\ref\Gemx.App.dll
+C:\dev\mcp\src\mp4shader\Gemx.App\obj\Debug\net8.0-windows\Gemx.App.sourcelink.json

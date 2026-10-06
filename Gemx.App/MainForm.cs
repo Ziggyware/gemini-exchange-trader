@@ -17,7 +17,6 @@ public sealed class MainForm : Form
     readonly Button _kill = new() { Text = "KILL", AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Color.Firebrick, ForeColor = Color.White };
     readonly Label _status = new() { AutoSize = true, Margin = new Padding(12, 8, 0, 0) };
 
-    // new visuals
     readonly FlowLayoutPanel _pillStrip = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true };
     readonly Label _pillWarm, _pillPos, _pillLag, _pillBook, _pillHealth, _pillKill;
     readonly InventoryBar _invBar = new() { Dock = DockStyle.Fill, Height = 28 };
@@ -42,8 +41,6 @@ public sealed class MainForm : Form
     long _rateTs = Stopwatch.GetTimestamp(), _rateFrames;
     double _fps;
     long _lastFillCount = 0;
-    double _realizedPnl = 0; // simple approx: (micro - avgEntry) * pos
-    double _avgEntry = 0;
 
     public MainForm()
     {
@@ -53,6 +50,7 @@ public sealed class MainForm : Form
         MinimumSize = new Size(1100, 700);
 
         _grid.SelectedObject = _settings;
+        _multi.Log = Log;
         _metrics.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _metrics.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _state = Metric("State");
@@ -75,7 +73,6 @@ public sealed class MainForm : Form
         _resync = Metric("MD resyncs");
         _socks = Metric("Sockets");
 
-        // pills
         _pillWarm = Pill("WARM");
         _pillPos = Pill("POS");
         _pillLag = Pill("LAG");
@@ -87,26 +84,23 @@ public sealed class MainForm : Form
         var bar = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Padding = new Padding(6, 6, 0, 0) };
         bar.Controls.AddRange(new Control[] { _start, _stop, _kill, _status, _pillStrip });
 
-        // ladder setup
         _ladder.Columns.Add("Bid Px", 90);
         _ladder.Columns.Add("Bid Qty", 70);
         _ladder.Columns.Add("Ask Px", 90);
         _ladder.Columns.Add("Ask Qty", 70);
         _ladder.Columns.Add("Note", 120);
 
-        // tape setup
         _tape.Columns.Add("Time", 90);
         _tape.Columns.Add("Type", 70);
         _tape.Columns.Add("Side", 50);
         _tape.Columns.Add("Price", 90);
         _tape.Columns.Add("Info", 300);
 
-        // right top area: metrics + invBar + pnl + edge
         var rightTop = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 4, ColumnCount = 1 };
-        rightTop.RowStyles.Add(new RowStyle(SizeType.Absolute, 30)); // inv bar
-        rightTop.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // pnl + edge
-        rightTop.RowStyles.Add(new RowStyle(SizeType.Percent, 55)); // metrics
-        rightTop.RowStyles.Add(new RowStyle(SizeType.Percent, 45)); // ladder
+        rightTop.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+        rightTop.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        rightTop.RowStyles.Add(new RowStyle(SizeType.Percent, 55));
+        rightTop.RowStyles.Add(new RowStyle(SizeType.Percent, 45));
         rightTop.Controls.Add(_invBar, 0, 0);
         var pnlPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, AutoSize = true };
         pnlPanel.Controls.Add(_pnlLabel);
@@ -122,19 +116,19 @@ public sealed class MainForm : Form
         inner.RowStyles.Add(new RowStyle(SizeType.Percent, 38));
         inner.Controls.Add(rightTop, 0, 0);
         inner.SetRowSpan(rightTop, 2);
-        inner.Controls.Add(_chart, 1, 0);
+
+        var chartTabs = new TabControl { Dock = DockStyle.Fill };
+        chartTabs.TabPages.Add("Ticks");
+        chartTabs.TabPages[0].Controls.Add(_chart);
+        chartTabs.TabPages.Add("Candles 1m-1M");
+        chartTabs.TabPages[1].Controls.Add(_multi);
+        inner.Controls.Add(chartTabs, 1, 0);
+
         var bottomRight = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
         bottomRight.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
         bottomRight.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
         bottomRight.Controls.Add(_tape, 0, 0);
         bottomRight.Controls.Add(_log, 0, 1);
-
-var chartTabs = new TabControl{ Dock=DockStyle.Fill };
-chartTabs.TabPages.Add("Ticks"); chartTabs.TabPages[0].Controls.Add(_chart);
-chartTabs.TabPages.Add("Candles 1m-1M"); chartTabs.TabPages[1].Controls.Add(_multi);
-inner.Controls.Add(chartTabs, 1, 0);
-
-
         inner.Controls.Add(bottomRight, 1, 1);
 
         _log.Font = _mono;
@@ -179,8 +173,9 @@ inner.Controls.Add(chartTabs, 1, 0);
         return new Label
         {
             Text = txt,
+            Tag = txt,   // immutable base name; Text is derived from it on every update
             AutoSize = false,
-            Size = new Size(72, 22),
+            Size = new Size(96, 22),
             TextAlign = ContentAlignment.MiddleCenter,
             Margin = new Padding(4, 2, 0, 2),
             BorderStyle = BorderStyle.FixedSingle,
@@ -188,13 +183,12 @@ inner.Controls.Add(chartTabs, 1, 0);
         };
     }
 
-    void SetPill(Label pill, bool ok, string? extra = null)
+    static void SetPill(Label pill, bool ok, string? extra = null)
     {
         pill.BackColor = ok ? Color.FromArgb(35, 85, 55) : Color.FromArgb(110, 35, 35);
         pill.ForeColor = ok ? Color.FromArgb(180, 255, 180) : Color.FromArgb(255, 200, 200);
-        if (extra != null) pill.Text = $"{pill.Tag ?? pill.Text.Split(' ')[0]} {extra}";
-        // store base name in Tag on first use
-        if (pill.Tag == null) pill.Tag = pill.Text;
+        string name = (string)pill.Tag!;
+        pill.Text = extra == null ? name : $"{name} {extra}";
     }
 
     void SetUi(UiState s)
@@ -229,12 +223,15 @@ inner.Controls.Add(chartTabs, 1, 0);
 
     static string SockState(FeedSocket s) => s.Current?.State.ToString() ?? "down";
 
+    static string Age(long nowNs, long sentNs, Slot s) =>
+        s == Slot.Idle || sentNs == 0 ? "" : $"  age {(nowNs - sentNs) / 1e9:F1}s";
+
     static (string Text, Color Color, string Reason) Describe(GemxHost h, EngineView v, long maxLagNs)
     {
-        if (h.Engine.Kill || v.KillSent) return v.KillSent && !v.FlushPending ? ("KILLED", Color.Firebrick, "cancel acked") : ("KILLING", Color.Firebrick, "flushing");
+        if (h.Engine.Kill || v.KillSent) return v.FlushOk ? ("KILLED", Color.Firebrick, "cancel acked") : ("KILLING", Color.Firebrick, "flushing");
         if (h.AuthRejected) return ("AUTH REJECTED", Color.Firebrick, "orders socket 401/403");
         if (v.Breaker) return ("BREAKER", Color.Firebrick, $"tripped, lag {v.LagNs / 1e6:F0}ms");
-        if (!v.Warm) return ("WARMING", Color.DarkOrange, $"{v.Sigma2} samples");
+        if (!v.Warm) return ("WARMING", Color.DarkOrange, $"{v.Samples} samples");
         if (v.LagNs > maxLagNs) return ("LAG", Color.DarkOrange, $"{v.LagNs / 1e6:F0} > {maxLagNs / 1e6:F0}ms");
         if (!v.IsHealthy) return ("UNHEALTHY", Color.DarkOrange, "book/pos");
         if (!v.Quoting) return ("WAITING", Color.DarkOrange, "no signal");
@@ -252,8 +249,8 @@ inner.Controls.Add(chartTabs, 1, 0);
         _rateTs = ts;
         _rateFrames = v.Frames;
 
-        var cfg = h.Engine.Config; // add public Config property in Engine: public EngineConfig Config => _c;
-        long maxLagNs = cfg?.MaxLagNs ?? 100_000_000L;
+        var cfg = h.Engine.Config;
+        long maxLagNs = cfg.MaxLagNs;
         var (text, color, reason) = Describe(h, v, maxLagNs);
 
         _state.Text = $"{text} ({reason})";
@@ -263,8 +260,8 @@ inner.Controls.Add(chartTabs, 1, 0);
         _bid.Text = P(v.BestBid8);
         _ask.Text = P(v.BestAsk8);
         _spread.Text = v.BestAsk8 > v.BestBid8 && v.BestBid8 > 0 ? $"{P(v.BestAsk8 - v.BestBid8)} ({(v.BestAsk8 - v.BestBid8) / (double)cfg.Q.Tick8:F1} ticks)" : "-";
-        _qBid.Text = $"{P(v.BidQuote8)}  {v.BidSlot} age {(ts - _rateTs) / 1e7:F1}s";
-        _qAsk.Text = $"{P(v.AskQuote8)}  {v.AskSlot} age {(ts - _rateTs) / 1e7:F1}s";
+        _qBid.Text = $"{P(v.BidQuote8)}  {v.BidSlot}{Age(v.RecvNs, v.BidSentNs, v.BidSlot)}";
+        _qAsk.Text = $"{P(v.AskQuote8)}  {v.AskSlot}{Age(v.RecvNs, v.AskSentNs, v.AskSlot)}";
         _sigma.Text = Math.Sqrt(v.Sigma2).ToString("G4", Inv);
         _ofi.Text = v.OfiNorm.ToString("F3", Inv) + (v.OfiNorm > 0.3 ? " BID HEAVY" : v.OfiNorm < -0.3 ? " ASK HEAVY" : "");
         _lag.Text = $"{v.LagNs / 1e6:F2} ms  (max {v.MaxLagSeenNs / 1e6:F2})";
@@ -277,7 +274,6 @@ inner.Controls.Add(chartTabs, 1, 0);
         _resync.Text = v.ResyncMd.ToString("N0", Inv);
         _socks.Text = $"md {SockState(h.Md)}  orders {(h.AuthRejected ? "auth rejected" : SockState(h.Orders))}";
 
-        // pills
         SetPill(_pillWarm, v.Warm);
         SetPill(_pillPos, Math.Abs(v.Pos8) < cfg.MaxPos8 * 0.8);
         SetPill(_pillLag, v.LagNs <= maxLagNs);
@@ -285,29 +281,26 @@ inner.Controls.Add(chartTabs, 1, 0);
         SetPill(_pillHealth, v.IsHealthy && v.Quoting);
         SetPill(_pillKill, !v.Killed && !v.KillSent, v.Killed ? "KILLED" : "OK");
 
-        // inventory bar
         _invBar.Pos8 = v.Pos8;
         _invBar.MaxPos8 = cfg.MaxPos8;
-        _invBar.Base8 = h.Engine.Config.Base8; // add public prop: public long BaseBalance8 => _base8;
+        _invBar.Base8 = v.Base8;
         _invBar.Invalidate();
 
-        // simple pnl approx
         if (v.Fills != _lastFillCount)
         {
-            // crude: update avgEntry on fill - you should compute exact in Engine
-            _avgEntry = v.Micro > 0 ? v.Micro : _avgEntry;
+            long n = v.Fills - _lastFillCount;
             _lastFillCount = v.Fills;
-            AddTape(DateTime.Now, "FILL", v.Pos8 > 0 ? "BUY" : "SELL", v.Micro.ToString("F2"), $"pos {v.Pos8 / 1e8:G}");
+            AddTape(DateTime.Now, "FILL", v.LastFillSell ? "SELL" : "BUY", P(v.LastFillPx8), $"x{n} pos {v.Pos8 / 1e8:G}");
         }
-        double upnl = v.Pos8 * (v.Micro - _avgEntry) / 1e8;
-        _pnlLabel.Text = $"Pos {v.Pos8 / 1e8:F6} avg {_avgEntry:F2} | uPnL ~ ${upnl:F2} | micro {v.Micro:F2}";
-        _pnlLabel.ForeColor = upnl >= 0 ? Color.LightGreen : Color.IndianRed;
+        double pnl = v.Micro > 0 ? v.CashUsd + v.Pos8 / 1e8 * v.Micro : v.CashUsd;
+        _pnlLabel.Text = $"Pos {v.Pos8 / 1e8:F6} | cash ${v.CashUsd:F2} | PnL ~ ${pnl:F2} | micro {v.Micro:F2}";
+        _pnlLabel.ForeColor = pnl >= 0 ? Color.LightGreen : Color.IndianRed;
 
-        // edge breakdown
         double tick = cfg.Q.Tick8 / 1e8;
-        _edgeLabel.Text = $"Edge: fee {cfg.Q.MakerFeeBps}bps | minEdge {cfg.Q.MinEdgeTicks * tick:F4} | sigma√lag {Math.Sqrt(v.Sigma2) * Math.Sqrt(cfg.RttSec):F4} | tick {tick}";
+        _edgeLabel.Text = $"Edge: fee {cfg.Q.MakerFeeBps}bps | minEdge {cfg.Q.MinEdgeTicks * tick:F4} | sigma√lag {Math.Sqrt(v.Sigma2) * Math.Sqrt(cfg.RttSec):F4} | tick {tick}"
+            + ((v.BlockFlags & 1) != 0 ? " | BID blocked" : "") + ((v.BlockFlags & 2) != 0 ? " | ASK blocked" : "");
 
-        // ladder - try to get book if exposed
+        // The book is mutated by the engine thread; this read is racy and only populated with a depth stream in MdSubs.
         try
         {
             var book = h.Engine.Book;
@@ -330,12 +323,11 @@ inner.Controls.Add(chartTabs, 1, 0);
             }
             _ladder.EndUpdate();
         }
-        catch { /* book not exposed */ }
+        catch { /* torn read of the live book */ }
 
         _chart.Push(v.BestBid8 / 1e8, v.BestAsk8 / 1e8, v.BidQuote8 / 1e8, v.AskQuote8 / 1e8, v.Micro, v.IntendedBid8 / 1e8, v.IntendedAsk8 / 1e8);
 
         _multi.Push(v.RecvNs, v.Micro > 0 ? v.Micro : (v.BestBid8 + v.BestAsk8) / 2 / 1e8, h.PriceDecimals);
-
     }
 
     void AddTape(DateTime t, string type, string side, string price, string info)
@@ -368,10 +360,11 @@ inner.Controls.Add(chartTabs, 1, 0);
             _fps = 0;
             _rateFrames = 0;
             _rateTs = Stopwatch.GetTimestamp();
+            _lastFillCount = 0;
             _tape.Items.Clear();
             SetUi(UiState.Running);
 
-            _ = _multi.LoadHistoryAsync(_settings.Symbol);
+            _ = _multi.LoadHistoryAsync(_settings.Symbol, h.PriceDecimals);
         }
         catch (Exception ex)
         {
@@ -434,6 +427,11 @@ inner.Controls.Add(chartTabs, 1, 0);
 
     sealed class InventoryBar : Control
     {
+        static readonly Pen BasePen = new(Color.FromArgb(60, 60, 70));
+        static readonly Pen MidPen = new(Color.Gray, 1) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dash };
+        static readonly Font Label = new("Consolas", 8f);
+        static readonly SolidBrush Ok = new(Color.SeaGreen), Warn = new(Color.Orange), Hot = new(Color.Firebrick);
+
         public long Pos8, MaxPos8 = 1, Base8;
         public InventoryBar() { DoubleBuffered = true; }
         protected override void OnPaint(PaintEventArgs e)
@@ -442,16 +440,14 @@ inner.Controls.Add(chartTabs, 1, 0);
             g.Clear(Color.FromArgb(28, 30, 35));
             float w = Width, h = Height;
             float mid = w * 0.5f;
-            // base line
-            g.DrawLine(new Pen(Color.FromArgb(60, 60, 70)), 0, h / 2, w, h / 2);
-            g.DrawLine(new Pen(Color.Gray, 1) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dash }, mid, 0, mid, h);
+            g.DrawLine(BasePen, 0, h / 2, w, h / 2);
+            g.DrawLine(MidPen, mid, 0, mid, h);
             if (MaxPos8 <= 0) return;
             double norm = Math.Clamp((double)Pos8 / MaxPos8, -1, 1);
             float x = (float)(mid + norm * mid * 0.9);
-            Color c = Math.Abs(norm) > 0.9 ? Color.Firebrick : Math.Abs(norm) > 0.6 ? Color.Orange : Color.SeaGreen;
-            using var br = new SolidBrush(c);
+            SolidBrush br = Math.Abs(norm) > 0.9 ? Hot : Math.Abs(norm) > 0.6 ? Warn : Ok;
             g.FillRectangle(br, Math.Min(mid, x), 4, Math.Abs(x - mid), h - 8);
-            g.DrawString($"POS {Pos8 / 1e8:F6} / {MaxPos8 / 1e8:F6}  base {Base8 / 1e8:F6}", new Font("Consolas", 8f), Brushes.White, 4, 4);
+            g.DrawString($"POS {Pos8 / 1e8:F6} / {MaxPos8 / 1e8:F6}  base {Base8 / 1e8:F6}", Label, Brushes.White, 4, 4);
         }
     }
 }
