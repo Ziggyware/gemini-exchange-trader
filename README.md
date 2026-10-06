@@ -77,6 +77,44 @@ quote-flow chart is permanently below it (56 / 44 split, collapsible log underne
 row now only picks the candle timeframe — the flow chart keeps its own legend title, takes wheel
 focus on hover and stays live regardless of which timeframe is selected.
 
+### Expert-weighted signal architecture
+
+New/default profiles use a bounded multi-signal ensemble rather than a single unweighted
+predictor. Normalised order-flow, depth topology, flow acceleration, EMA momentum and
+standardised return surprise are fused in price units. High and extreme volatility regimes
+attenuate directional conviction, while `MaxSignalDriftTicks` is a hard invariant: no signal
+combination can move the reservation price beyond that limit. A causal three-scale EMA bank
+measures horizon agreement; smooth bounded-influence transforms suppress outliers; and a
+single reliability term contracts conviction under scale conflict, spread degradation, jump
+surprise, or hostile volatility regimes. Spread, inventory, latency, post-only and funds
+constraints remain downstream and cannot be overridden by a score.
+
+`AdvancedAnalytics.cs` now supplies the executable state model behind that path:
+
+- persistent-depth topology (distance decay, level survival, concentration, slope/convexity,
+  replenishment/depletion hysteresis, gap fragility, transience and topology microprice);
+- fast/medium/slow realized-risk surfaces with bounded returns, jump intensity/variance,
+  liquidity variance, tail loss and model disagreement;
+- robust EW cross-feature covariance, a periodic symmetric Jacobi eigensolver, spectral
+  displacement/entropy and a six-state Bayesian regime posterior;
+- contamination, venue reliability, adverse-selection and fill-probability estimates;
+- reliability-weighted alpha, adaptive risk aversion and a deterministic posterior stress
+  lattice producing an expected-shortfall leverage score and explicit abstention decision.
+
+The engine applies these lexicographically: analytics learns throughout warm-up, health and hard
+risk gate execution, analytical abstention withdraws quotes, then topology microprice,
+horizon-matched risk and adaptive gamma enter the existing post-only quoter. The complete state
+is published in `EngineView` for attribution and replay. The terminal's scrollable **Market
+intelligence** card charts every published topology, surface, regime, reliability, execution and
+stress-decision field over a 240-update history. Related series occupy labeled lanes, categorical
+regime/abstention state uses a colored timeline, and every legend carries its live numeric value;
+snapshots include the same decision evidence. The hot engine ticker path is allocation-free.
+
+The default profile enables depth, warms for 300 grid observations, uses a two-tick edge floor,
+and exposes every weight under **Signal fusion** in Settings. These are conservative research
+priors, not claims of universal optimality or profitability; calibrate them with recorded replay
+and out-of-sample data for the selected symbol and venue before live use.
+
 ### Insufficient funds
 
 Quoting used to discover a missing balance the hard way — repeated rejects until the breaker

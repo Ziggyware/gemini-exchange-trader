@@ -66,6 +66,7 @@ public sealed class MainForm : Form
     readonly StatGrid _statPos = new(2, 2);
     readonly StatGrid _statPerf = new(3, 1);
     readonly StatGrid _statQuote = new(3, 2);
+    readonly IntelligenceChart _intelChart = new();
     readonly StatGrid _statDiag = new(2, 5);
 
     readonly CardStack _rail = new();
@@ -73,6 +74,7 @@ public sealed class MainForm : Form
     readonly Card _cardPerf = new("Performance", "target", Pal.Accent, 140);
     readonly Card _cardQuotes = new("Live quotes", "layers", Pal.Violet, 176);
     readonly Card _cardSignals = new("Signals", "wave", Pal.Warn, 186);
+    readonly Card _cardIntel = new("Market intelligence", "target", Pal.Violet, 830);
     readonly Card _cardDiag = new("Diagnostics", "depth", Pal.Neutral, 200);
 
     readonly StatusPill _pillWarm = new("WARM");
@@ -396,6 +398,15 @@ public sealed class MainForm : Form
         _tip.SetToolTip(_mWarm, "Volatility samples collected against the warm-up requirement.");
         _rail.Add(_cardSignals);
 
+        // MARKET INTELLIGENCE -------------------------------------------------
+        // Complete executable epistemic state: topology, risk surface, regime,
+        // robust reliability, execution quality and stress decision.
+        _intelChart.Dock = DockStyle.Fill;
+        _intelChart.Surface = Pal.Card;
+        _cardIntel.Body.Controls.Add(_intelChart);
+        _tip.SetToolTip(_intelChart, "Every advanced state is charted over the last 240 updates. Each colored line is independently range-normalized; its live numeric value is printed in the lane legend.");
+        _rail.Add(_cardIntel);
+
         // DIAGNOSTICS ---------------------------------------------------------
         _statDiag.Dock = DockStyle.Fill;
         _cardDiag.Body.Controls.Add(_statDiag);
@@ -542,6 +553,17 @@ public sealed class MainForm : Form
         return st == "Open" ? StateTone.Good : st == "Connecting" ? StateTone.Warm : StateTone.Bad;
     }
 
+    static string RegimeName(int regime) => regime switch
+    {
+        0 => "quiet liquidity",
+        1 => "directional flow",
+        2 => "mean reversion",
+        3 => "liquidity withdrawal",
+        4 => "jump transition",
+        5 => "venue impairment",
+        _ => "unknown"
+    };
+
     static (string Text, string Reason, StateTone Tone) Describe(GemxHost h, EngineView v, long maxLagNs, int dec)
     {
         if (h.Engine.Kill || v.KillSent)
@@ -552,6 +574,7 @@ public sealed class MainForm : Form
         if (v.LagNs > maxLagNs) return ("Lagging", $"{Fmt.Lag(v.LagNs)} over {Fmt.Lag(maxLagNs)}", StateTone.Warm);
         if (!v.IsHealthy) return ("Unhealthy", "book or position unknown", StateTone.Warm);
         if ((v.FundsFlags & 3) == 3) return ("No funds", "insufficient balance — quoting paused", StateTone.Warm);
+        if (v.AnalyticsAbstain) return ("Abstaining", $"{RegimeName(v.MarketRegime)} · contamination {v.Contamination:P0}", StateTone.Warm);
         if (!v.Quoting) return ("Waiting", "no signal", StateTone.Warm);
         return ("Quoting", $"bid {Fmt.Price(v.BestBid8, dec)}  ask {Fmt.Price(v.BestAsk8, dec)}", StateTone.Good);
     }
@@ -696,6 +719,10 @@ public sealed class MainForm : Form
         _mWarm.Set($"{Math.Min(v.Samples, cfg.WarmupSamples)} / {cfg.WarmupSamples}", Gfx.Clamp01(v.Samples / (double)Math.Max(1, cfg.WarmupSamples)),
             v.Warm ? Pal.Up : Pal.Warn, null, null, warmPct + "%");
 
+        // ---- complete market-intelligence history chart
+        _intelChart.Push(in v);
+        _cardIntel.Caption = $"{RegimeName(v.MarketRegime)} · {(v.AnalyticsAbstain ? "abstain" : "quote")} · ρ {v.SignalConfidence:P0}";
+
         // ---- diagnostics card
         _statDiag.Set(0, "frames", Fmt.Count(v.Frames), Pal.Text);
         _statDiag.Set(1, "rate", _fps.ToString("F1", Inv) + " /s", Pal.Text);
@@ -714,7 +741,8 @@ public sealed class MainForm : Form
         _pillPos.Set(Math.Abs(v.Pos8) < cfg.MaxPos8 * 0.8 ? StateTone.Good : Math.Abs(v.Pos8) >= cfg.MaxPos8 ? StateTone.Bad : StateTone.Warm, (Math.Abs(v.Pos8) / (double)cfg.MaxPos8 * 100).ToString("F0", Inv) + "%", Math.Abs(v.Pos8) >= cfg.MaxPos8);
         _pillLag.Set(v.LagNs <= cfg.MaxLagNs ? StateTone.Good : StateTone.Bad, lagMs.ToString("F1", Inv) + "ms", v.LagNs > cfg.MaxLagNs);
         _pillBook.Set(v.BestBid8 > 0 && v.BestAsk8 > v.BestBid8 ? StateTone.Good : StateTone.Bad, spread > 0 ? (spread / (double)tick).ToString("F0", Inv) + "t" : "-");
-        _pillHealth.Set(v.IsHealthy && v.Quoting ? StateTone.Good : v.Breaker ? StateTone.Bad : StateTone.Warm, v.Breaker ? "BRK" : v.Quoting ? "ok" : "-");
+        _pillHealth.Set(v.Breaker ? StateTone.Bad : v.AnalyticsAbstain ? StateTone.Warm : v.IsHealthy && v.Quoting ? StateTone.Good : StateTone.Warm,
+            v.Breaker ? "BRK" : v.AnalyticsAbstain ? "ABST" : v.Quoting ? "ok" : "-");
         _pillKill.Set(v.Killed || v.KillSent ? StateTone.Bad : StateTone.Good, v.Killed ? "KILLED" : v.KillSent ? "SENT" : "armed");
         _pillMd.Set(SocketTone(h.Md));
         _pillOrd.Set(h.Paper ? StateTone.Info : h.AuthRejected ? StateTone.Bad : SocketTone(h.Orders), h.Paper ? "paper" : null);
@@ -797,6 +825,11 @@ public sealed class MainForm : Form
             sb.AppendLine($"position   {Fmt.Qty(v.Pos8 / 1e8, _qDec)}  base {Fmt.Qty(v.Base8 / 1e8, _qDec)}  cash {v.CashUsd:F2}");
             sb.AppendLine($"funds      quote {(v.QuoteKnown ? "$" + (v.QuoteAvail8 / 1e8).ToString("N2", Inv) : "unknown")}  funds-blocked {v.FundsFlags}  risk-blocked {v.BlockFlags}  funds-rejects {v.FundsRejects}");
             sb.AppendLine($"signals    sigma {Math.Sqrt(Math.Max(0, v.Sigma2)):G4}  ofi {v.OfiNorm:F3}  lag {Fmt.Lag(v.LagNs)}  samples {v.Samples}/{c.WarmupSamples}");
+            sb.AppendLine($"decision   {(v.AnalyticsAbstain ? "ABSTAIN" : "QUOTE")}  alpha-reliability {v.SignalConfidence:P1}  leverage {v.LeverageScore:F4}");
+            sb.AppendLine($"regime     {RegimeName(v.MarketRegime)}  posterior {v.RegimeProbability:P1}  spectral shift {v.SpectralShift:G4}  entropy {v.SpectralEntropy:F4}");
+            sb.AppendLine($"topology   imbalance {v.TopologyImbalance:F4}  micro {v.TopologyMicro:F4}  transience {v.LiquidityTransience:P1}  gaps {v.GapFragility:F2}t");
+            sb.AppendLine($"risk       var fast/medium/slow {v.FastVariance:G4}/{v.MediumVariance:G4}/{v.SlowVariance:G4}  jumps {v.JumpIntensity:G4}  tail {v.TailLoss:G4}");
+            sb.AppendLine($"execution  fill {v.FillProbability:P1}  adverse {v.AdverseSelection:P1}  venue {v.VenueReliability:P1}  contamination {v.Contamination:P1}  coherence {v.ScaleCoherence:P1}");
             sb.AppendLine($"counters   frames {v.Frames}  faults {v.Fails}  cmds {v.Cmds}  fills {v.Fills}  trips {v.Trips}  resyncs {v.ResyncMd}  divergences {v.Divergences}");
             sb.AppendLine($"sockets    md {SockState(h.Md)}  orders {(h.AuthRejected ? "auth rejected" : SockState(h.Orders))}  sent {h.Exec.Sent}  dropped {h.Exec.Dropped}");
         }

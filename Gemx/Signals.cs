@@ -33,8 +33,13 @@ public sealed class Signals
 
     // ── Improvement #1: Momentum EMA for trend filter ──
     readonly double _momTau;
-    double _emaFast, _emaSlow;
+    double _emaFast, _emaSlow, _emaAnchor;
     public double Momentum => _emaFast - _emaSlow;
+    public double SlowMomentum => _emaSlow - _emaAnchor;
+    // Agreement between adjacent causal scales. Conflicting horizons retain a
+    // small non-zero weight instead of creating a brittle binary gate.
+    public double ScaleCoherence { get; private set; } = 0.65;
+    public double JumpScore => Math.Abs(ZScore);
 
     // ── Improvement #2: Z-score for mean-reversion signal ──
     double _sumR, _sumR2;
@@ -83,6 +88,7 @@ public sealed class Signals
             AvgSize = 0.5 * tot;
             _emaFast = mid;
             _emaSlow = mid;
+            _emaAnchor = mid;
             _avgSpread = spread;
             _sigmaEma = 0;
         }
@@ -104,8 +110,14 @@ public sealed class Signals
             // ── Improvement #1: Dual EMA momentum ──
             double alphaFast = 1 - Math.Exp(-dt / _momTau);
             double alphaSlow = 1 - Math.Exp(-dt / (_momTau * 4));
+            double alphaAnchor = 1 - Math.Exp(-dt / (_momTau * 12));
             _emaFast += alphaFast * (mid - _emaFast);
             _emaSlow += alphaSlow * (mid - _emaSlow);
+            _emaAnchor += alphaAnchor * (mid - _emaAnchor);
+            double fastMom = Momentum, slowMom = SlowMomentum;
+            ScaleCoherence = Math.Abs(fastMom) < 1e-12 || Math.Abs(slowMom) < 1e-12
+                ? 0.65
+                : Math.Sign(fastMom) == Math.Sign(slowMom) ? 1.0 : 0.35;
 
             // ── Improvement #3: Rolling spread average ──
             double spreadAlpha = 1 - Math.Exp(-dt / 10.0);
@@ -120,19 +132,20 @@ public sealed class Signals
                 // ret spans k grid steps: per-second variance is ret^2 / (k * gridSec)
                 Sigma2 = a * Sigma2 + (1 - a) * ret * ret / (k * _gridSec);
                 _gridNs += k * _stepNs;
-                _gridMid = mid;
                 Samples = (int)Math.Min(int.MaxValue, Samples + k);
 
-                // ── Improvement #2: Z-score update on grid ──
+                // Standardized return surprise. Compute before advancing the
+                // anchor (the prior implementation compared mid with itself).
                 double sigma = Math.Sqrt(Sigma2);
                 if (sigma > 1e-10)
                 {
-                    ZScore = (mid - _gridMid) / sigma;
+                    ZScore = ret / (sigma * Math.Sqrt(k * _gridSec));
                     // update running stats for normalization
                     _sumR += ret;
                     _sumR2 += ret * ret;
                     _rCount++;
                 }
+                _gridMid = mid;
             }
 
             // ── Improvement #4: Volatility regime ──
@@ -193,10 +206,8 @@ public static class Quoter
         double invPenalty = invBase * p.Gamma * sigma2 * effectiveHorizon;
         double r = micro + drift - invPenalty;
 
-        // ── Improvement #9: Momentum-aware skew ──
-        // Shift quotes in direction of momentum to capture trend
-        double momSkew = momentum * 0.001; // small bias
-        r += momSkew;
+        // Directional signals are fused, regime-attenuated and bounded by Engine;
+        // no hidden skew is added here, preserving one auditable decision path.
 
         bid8 = FloorTick((r - half) * 1e8, p.Tick8);
         ask8 = CeilTick((r + half) * 1e8, p.Tick8);
