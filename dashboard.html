@@ -1,0 +1,1216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>⬡ GEMX IDLE TRADER</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0c10;--bg2:#0e1117;--bg3:#161b22;--bg4:#1c2128;
+  --border:#30363d;--text:#e6edf3;--dim:#7d8590;--accent:#58a6ff;
+  --green:#3fb950;--red:#f85149;--orange:#d29922;--purple:#bc8cff;
+  --cyan:#39d2c0;--pink:#f778ba;--gold:#e3b341;
+  --glow-green:0 0 12px rgba(63,185,80,.4);
+  --glow-red:0 0 12px rgba(248,81,73,.4);
+  --glow-gold:0 0 20px rgba(227,179,65,.3);
+}
+@font-face{font-family:'Mono';src:local('SF Mono'),local('JetBrains Mono'),local('Fira Code'),local('Consolas'),local('monospace')}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Mono',monospace;font-size:12px;overflow:hidden}
+
+/* ── GRID LAYOUT ── */
+#app{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;grid-template-rows:48px 1fr 1fr 1fr 36px;gap:1px;height:100vh;background:var(--border)}
+#app>div{background:var(--bg2);padding:6px 8px;overflow:hidden;position:relative}
+
+/* header spans all cols */
+.hdr{grid-column:1/-1;display:flex;align-items:center;gap:16px;padding:8px 16px!important;background:var(--bg)!important}
+.hdr h1{font-size:18px;font-weight:700;color:var(--accent);letter-spacing:2px}
+.hdr .sym{font-size:14px;color:var(--gold)}
+.hdr .status{margin-left:auto;font-size:11px;display:flex;gap:12px;align-items:center}
+.hdr .pill{padding:2px 10px;border-radius:10px;font-size:10px;font-weight:700;letter-spacing:1px}
+
+/* footer spans all cols */
+.ftr{grid-column:1/-1;display:flex;align-items:center;gap:20px;padding:4px 16px!important;font-size:10px;color:var(--dim);background:var(--bg)!important}
+
+/* panels */
+.panel{display:flex;flex-direction:column;gap:4px}
+.panel-title{font-size:9px;text-transform:uppercase;letter-spacing:2px;color:var(--dim);margin-bottom:2px;font-weight:700}
+
+/* ── XP BAR (idle game) ── */
+#xp-area{grid-column:1/-1;grid-row:2;height:auto;background:var(--bg)!important;padding:4px 16px!important;display:flex;align-items:center;gap:16px}
+.xp-bar{flex:1;height:18px;background:var(--bg3);border-radius:9px;overflow:hidden;position:relative;border:1px solid var(--border)}
+.xp-fill{height:100%;border-radius:9px;background:linear-gradient(90deg,var(--purple),var(--accent));transition:width .3s;position:relative}
+.xp-fill::after{content:'';position:absolute;top:0;left:0;right:0;height:50%;background:linear-gradient(180deg,rgba(255,255,255,.15),transparent);border-radius:9px 9px 0 0}
+.xp-label{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:9px;font-weight:700;color:white;text-shadow:0 1px 3px rgba(0,0,0,.8);white-space:nowrap}
+.level-badge{background:var(--gold);color:var(--bg);padding:2px 12px;border-radius:12px;font-weight:900;font-size:14px;box-shadow:var(--glow-gold);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 8px rgba(227,179,65,.3)}50%{box-shadow:0 0 20px rgba(227,179,65,.6)}}
+
+/* ── BIG PRICE ── */
+.big-price{font-size:36px;font-weight:900;line-height:1;letter-spacing:-1px}
+.big-price.up{color:var(--green);text-shadow:var(--glow-green)}
+.big-price.down{color:var(--red);text-shadow:var(--glow-red)}
+.big-price.flat{color:var(--text)}
+.price-sub{font-size:11px;color:var(--dim);margin-top:2px}
+
+/* ── SPARKLINE ── */
+.spark{width:100%;height:48px}
+
+/* ── METRIC ROWS ── */
+.metric{display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid rgba(48,54,61,.3)}
+.metric:last-child{border:none}
+.metric .k{color:var(--dim);font-size:10px}
+.metric .v{font-weight:700;font-size:12px;text-align:right}
+.metric .v.green{color:var(--green)}.metric .v.red{color:var(--red)}.metric .v.orange{color:var(--orange)}
+.metric .v.cyan{color:var(--cyan)}.metric .v.purple{color:var(--purple)}.metric .v.gold{color:var(--gold)}
+
+/* ── REGIME BADGE ── */
+.regime{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:1px}
+.regime.low{background:rgba(63,185,80,.15);color:var(--green)}
+.regime.med{background:rgba(210,153,34,.15);color:var(--orange)}
+.regime.high{background:rgba(248,81,73,.15);color:var(--red)}
+.regime.extreme{background:rgba(248,81,73,.3);color:#ff6b6b;animation:flash .5s infinite}
+@keyframes flash{0%,100%{opacity:1}50%{opacity:.5}}
+
+/* ── SIGNAL BARS ── */
+.sig-bar{height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;margin:2px 0}
+.sig-fill{height:100%;border-radius:3px;transition:width .15s,background .15s}
+
+/* ── PHANTOM TRADES ── */
+.phantom{padding:4px 8px;margin:2px 0;border-radius:4px;font-size:10px;border-left:3px solid transparent}
+.phantom.buy{background:rgba(63,185,80,.08);border-left-color:var(--green)}
+.phantom.sell{background:rgba(248,81,73,.08);border-left-color:var(--red)}
+.phantom.idle{background:rgba(125,133,144,.05);border-left-color:var(--dim)}
+.phantom .px{font-weight:700}
+.phantom .qty{color:var(--dim)}
+.phantom .reason{font-size:9px;color:var(--dim);margin-top:1px}
+
+/* ── ORDER BOOK LADDER ── */
+.ladder{font-size:10px}
+.ladder-row{display:grid;grid-template-columns:1fr 1fr 1fr 60px;gap:4px;padding:1px 0;position:relative}
+.ladder-row.header{color:var(--dim);font-size:9px;border-bottom:1px solid var(--border);padding-bottom:3px;margin-bottom:2px}
+.ladder-row .bar{position:absolute;top:0;height:100%;opacity:.12;border-radius:2px}
+.ladder-row.bid .bar{right:0;background:var(--green)}
+.ladder-row.ask .bar{left:0;background:var(--red)}
+.ladder-row.our{font-weight:700}
+.ladder-row.our::before{content:'▸';position:absolute;left:-10px;color:var(--gold)}
+
+/* ── TAPE ── */
+.tape-row{display:grid;grid-template-columns:65px 40px 1fr;gap:6px;padding:1px 0;font-size:10px}
+.tape-row.buy{color:var(--green)}.tape-row.sell{color:var(--red)}
+
+/* ── ACHIEVEMENTS ── */
+.achievement{display:inline-block;padding:3px 8px;margin:2px;border-radius:6px;font-size:9px;font-weight:700;background:var(--bg3);border:1px solid var(--border);opacity:.4}
+.achievement.unlocked{opacity:1;border-color:var(--gold);box-shadow:0 0 8px rgba(227,179,65,.2)}
+.achievement .icon{margin-right:3px}
+
+/* ── PARTICLES CANVAS ── */
+#particles{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:100}
+
+/* ── GHOST ORDERS ── */
+.ghost-order{position:absolute;width:4px;height:4px;border-radius:50%;pointer-events:none;animation:ghost-pop .8s ease-out forwards}
+@keyframes ghost-pop{0%{transform:scale(1);opacity:.8}100%{transform:scale(3);opacity:0}}
+
+/* ── CONNECTION ── */
+.conn-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.conn-dot.ok{background:var(--green);box-shadow:0 0 6px var(--green)}
+.conn-dot.err{background:var(--red);box-shadow:0 0 6px var(--red)}
+.conn-dot.connecting{background:var(--orange);animation:blink 1s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* scrollbar */
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+</style>
+</head>
+<body>
+<canvas id="particles"></canvas>
+<div id="app">
+  <!-- HEADER -->
+  <div class="hdr">
+    <h1>⬡ GEMX</h1>
+    <span class="sym" id="sym">—</span>
+    <div class="status">
+      <span><span class="conn-dot" id="conn-md"></span> MD</span>
+      <span id="fps">0 fps</span>
+      <span id="uptime">00:00:00</span>
+      <span class="pill" id="state-pill" style="background:var(--bg3);color:var(--dim)">OFFLINE</span>
+    </div>
+  </div>
+
+  <!-- XP BAR (idle game) -->
+  <div id="xp-area">
+    <div class="level-badge" id="level">LV 1</div>
+    <div class="xp-bar"><div class="xp-fill" id="xp-fill" style="width:0%"></div><span class="xp-label" id="xp-label">0 / 100 XP</span></div>
+    <div style="text-align:center;min-width:80px">
+      <div style="font-size:9px;color:var(--dim)">COMBO</div>
+      <div id="combo" style="font-size:16px;font-weight:900;color:var(--pink)">0</div>
+    </div>
+    <div style="text-align:center;min-width:80px">
+      <div style="font-size:9px;color:var(--dim)">STREAK</div>
+      <div id="streak" style="font-size:16px;font-weight:900;color:var(--cyan)">0</div>
+    </div>
+    <div style="text-align:right;min-width:100px">
+      <div style="font-size:9px;color:var(--dim)">SCORE</div>
+      <div id="score" style="font-size:18px;font-weight:900;color:var(--gold)">0</div>
+    </div>
+  </div>
+
+  <!-- COL 1: PRICE + SIGNALS + IMPROVEMENTS -->
+  <div class="panel" style="grid-row:3/5">
+    <div class="panel-title">Price</div>
+    <div class="big-price flat" id="big-price">—</div>
+    <div class="price-sub"><span id="spread-val">—</span> · <span id="mid-val">—</span></div>
+    <canvas class="spark" id="spark-price" height="48"></canvas>
+
+    <div class="panel-title" style="margin-top:6px">Quote Chart <span style="font-size:8px;color:var(--dim)">(green=bid red=ask dashed=intended)</span></div>
+    <canvas class="spark" id="spark-quotes" height="56"></canvas>
+
+    <div class="panel-title" style="margin-top:4px">Energy <span style="font-size:8px;color:var(--dim)">(warmup progress)</span></div>
+    <div class="sig-bar" style="height:10px"><div class="sig-fill" id="energy-bar" style="width:0%;background:linear-gradient(90deg,var(--purple),var(--accent));transition:width .3s"></div></div>
+    <div style="display:flex;justify-content:space-between;font-size:8px;color:var(--dim)"><span>0</span><span id="energy-label">0 / 50 samples</span><span>50</span></div>
+
+    <div class="panel-title" style="margin-top:4px">10 Trading Improvements</div>
+    <div id="improvements"></div>
+  </div>
+
+  <!-- COL 2: PHANTOM TRADES + BOOK -->
+  <div class="panel" style="grid-row:3/5">
+    <div class="panel-title">👻 Phantom Trades <span style="font-size:9px;color:var(--dim)">(what if you had $$)</span></div>
+    <div id="phantom-zone" style="min-height:80px"></div>
+
+    <div class="panel-title" style="margin-top:8px">Order Book</div>
+    <div class="ladder">
+      <div class="ladder-row header"><span>Bid Qty</span><span>Bid Px</span><span>Ask Px</span><span>Ask Qty</span></div>
+      <div id="ladder-body"></div>
+    </div>
+  </div>
+
+  <!-- COL 3: SIGNALS + REGIME -->
+  <div class="panel" style="grid-row:3/5">
+    <div class="panel-title">Engine Signals</div>
+    <div class="metric"><span class="k">Regime</span><span class="v"><span class="regime low" id="regime">LOW</span></span></div>
+    <div class="metric"><span class="k">σ (volatility)</span><span class="v cyan" id="sigma">—</span></div>
+    <div class="metric"><span class="k">OFI / avg</span><span class="v" id="ofi">—</span></div>
+    <div class="metric"><span class="k">OFI Accel</span><span class="v" id="ofi-accel">—</span></div>
+    <div class="metric"><span class="k">Momentum</span><span class="v" id="momentum">—</span></div>
+    <div class="metric"><span class="k">Z-Score</span><span class="v" id="zscore">—</span></div>
+    <div class="metric"><span class="k">Spread Ratio</span><span class="v" id="spread-ratio">—</span></div>
+    <div class="metric"><span class="k">Spread Quality</span><span class="v" id="spread-quality">—</span></div>
+    <div class="metric"><span class="k">Lag</span><span class="v" id="lag">—</span></div>
+    <div class="metric"><span class="k">Position</span><span class="v" id="pos">0</span></div>
+
+    <div class="panel-title" style="margin-top:8px">Signal Strength</div>
+    <div style="font-size:9px;color:var(--dim)">OFI</div><div class="sig-bar"><div class="sig-fill" id="bar-ofi" style="width:50%;background:var(--dim)"></div></div>
+    <div style="font-size:9px;color:var(--dim)">Momentum</div><div class="sig-bar"><div class="sig-fill" id="bar-mom" style="width:50%;background:var(--dim)"></div></div>
+    <div style="font-size:9px;color:var(--dim)">Z-Score</div><div class="sig-bar"><div class="sig-fill" id="bar-z" style="width:50%;background:var(--dim)"></div></div>
+    <div style="font-size:9px;color:var(--dim)">Inventory</div><div class="sig-bar"><div class="sig-fill" id="bar-inv" style="width:50%;background:var(--dim)"></div></div>
+
+    <canvas class="spark" id="spark-sigma" height="36" style="margin-top:6px"></canvas>
+  </div>
+
+  <!-- COL 4: STATS + ACHIEVEMENTS -->
+  <div class="panel" style="grid-row:3/5">
+    <div class="panel-title">Trading Stats</div>
+    <div class="metric"><span class="k">Phantom Fills</span><span class="v green" id="fills">0</span></div>
+    <div class="metric"><span class="k">Phantom P&L</span><span class="v" id="pnl">$0.00</span></div>
+    <div class="metric"><span class="k">Win Rate</span><span class="v" id="winrate">—</span></div>
+    <div class="metric"><span class="k">Best Trade</span><span class="v green" id="best-trade">$0.00</span></div>
+    <div class="metric"><span class="k">Worst Trade</span><span class="v red" id="worst-trade">$0.00</span></div>
+    <div class="metric"><span class="k">Avg Edge</span><span class="v cyan" id="avg-edge">—</span></div>
+    <div class="metric"><span class="k">Frames</span><span class="v" id="frames">0</span></div>
+    <div class="metric"><span class="k">Frames/s</span><span class="v" id="fps-metric">0</span></div>
+
+    <div class="panel-title" style="margin-top:8px">Achievements</div>
+    <div id="achievements"></div>
+
+    <div class="panel-title" style="margin-top:8px">Tape</div>
+    <div id="tape" style="max-height:120px;overflow-y:auto"></div>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="ftr">
+    <span>Gemini Public WebSocket · No API keys needed · All computation client-side</span>
+    <span style="margin-left:auto">Improvements: Adaptive Sizing · OFI Skew · Momentum Filter · Z-Score · Spread Gate · Inventory Penalty · Phantom P&L · Fill Tracking · Latency Adapt · Regime Detection</span>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════════════
+// GEMX IDLE TRADER — Client-side trading engine with 10 improvements
+// ══════════════════════════════════════════════════════════════════════
+
+const $ = s => document.getElementById(s);
+const ctx = $('particles').getContext('2d');
+
+// ── Canvas resize ──
+function resizeCanvas() {
+  const c = $('particles');
+  c.width = innerWidth; c.height = innerHeight;
+}
+resizeCanvas();
+addEventListener('resize', resizeCanvas);
+
+// ══════════════════════════════════════════════════════════════════════
+// CONFIGURATION
+// ══════════════════════════════════════════════════════════════════════
+const CFG = {
+  symbol: 'btcusd',
+  quoteQty: 0.0001,        // base units per quote
+  maxPos: 0.005,           // max position
+  gamma: 0.1,              // risk aversion
+  k: 1.5,                  // order arrival decay
+  horizonSec: 1.0,         // inventory horizon
+  alpha: 0,                // OFI drift coefficient
+  makerFeeBps: 0,          // maker fee
+  minEdgeTicks: 1,
+  tickSize: 0.01,          // price tick
+  warmupSamples: 50,
+  maxLagMs: 100,
+  rttSec: 0.010,
+  imbalanceWeight: 0,
+  volHalfLifeSec: 30,
+  ofiTauSec: 1.0,
+  gridSec: 0.1,
+};
+
+// ══════════════════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════════════════
+const S = {
+  bid: 0, ask: 0, bidQty: 0, askQty: 0, mid: 0, micro: 0,
+  prevBid: 0, prevAsk: 0, prevBidQty: 0, prevAskQty: 0,
+  ofi: 0, avgSize: 0, sigma2: 0, samples: 0, ofiNorm: 0,
+  momentum: 0, emaFast: 0, emaSlow: 0, zScore: 0,
+  spreadRatio: 1, avgSpread: 0, ofiAccel: 0, prevOfiNorm: 0,
+  sigmaEma: 0, regime: 0, // 0=Low,1=Med,2=High,3=Extreme
+  pos: 0, base: 0, fills: 0, wins: 0, losses: 0,
+  totalPnl: 0, bestTrade: 0, worstTrade: 0, avgEntry: 0,
+  lastFillPx: 0, edgeAccum: 0,
+  gridMid: 0, gridNs: 0, lastNs: 0, init: false,
+  frames: 0, fails: 0,
+  // idle game
+  xp: 0, level: 1, score: 0, xpToNext: 100,
+  combo: 0, maxCombo: 0, streak: 0, bestStreak: 0,
+  // phantom orders
+  bidOrder: null, askOrder: null, bidLive: false, askLive: false,
+  // price history
+  priceHistory: [], sigmaHistory: [],
+  // book
+  book: { bids: [], asks: [] },
+  // tape
+  tape: [],
+  // timing
+  startTime: Date.now(),
+  lastFrameNs: 0,
+  fps: 0, fpsAccum: 0, fpsTs: Date.now(),
+  // achievements
+  achievements: {},
+};
+
+// ══════════════════════════════════════════════════════════════════════
+// SPARKLINE RENDERER (SIMD-friendly batch processing)
+// ══════════════════════════════════════════════════════════════════════
+class Sparkline {
+  constructor(canvas, { color = '#58a6ff', fill = 'rgba(88,166,255,.08)', maxPts = 200 } = {}) {
+    this.el = typeof canvas === 'string' ? $(canvas) : canvas;
+    this.color = color; this.fill = fill; this.data = []; this.max = maxPts;
+  }
+  push(v) {
+    this.data.push(v);
+    if (this.data.length > this.max) this.data.shift();
+  }
+  draw() {
+    const c = this.el, g = c.getContext('2d');
+    const w = c.width = c.clientWidth * devicePixelRatio;
+    const h = c.height = c.clientHeight * devicePixelRatio;
+    g.scale(devicePixelRatio, devicePixelRatio);
+    const W = c.clientWidth, H = c.clientHeight;
+    g.clearRect(0, 0, W, H);
+    const d = this.data; if (d.length < 2) return;
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < d.length; i++) { if (d[i] < lo) lo = d[i]; if (d[i] > hi) hi = d[i]; }
+    const span = hi - lo || 1;
+    const dx = W / (this.max - 1);
+
+    // fill
+    g.beginPath();
+    g.moveTo(W, H);
+    for (let i = 0; i < d.length; i++) {
+      const x = W - (d.length - 1 - i) * dx;
+      const y = H - ((d[i] - lo) / span) * (H - 4) - 2;
+      i === 0 ? g.moveTo(x, y) : g.lineTo(x, y);
+    }
+    g.lineTo(W - (d.length - 1) * dx, H);
+    g.closePath();
+    g.fillStyle = this.fill; g.fill();
+
+    // line
+    g.beginPath();
+    for (let i = 0; i < d.length; i++) {
+      const x = W - (d.length - 1 - i) * dx;
+      const y = H - ((d[i] - lo) / span) * (H - 4) - 2;
+      i === 0 ? g.moveTo(x, y) : g.lineTo(x, y);
+    }
+    g.strokeStyle = this.color; g.lineWidth = 1.5; g.stroke();
+  }
+}
+
+const sparkPrice = new Sparkline('spark-price', { color: '#58a6ff', fill: 'rgba(88,166,255,.06)' });
+const sparkSigma = new Sparkline('spark-sigma', { color: '#bc8cff', fill: 'rgba(188,140,255,.06)' });
+
+// ══════════════════════════════════════════════════════════════════════
+// QUOTE CHARKSPARK — multi-line sparkline for quotes
+// ══════════════════════════════════════════════════════════════════════
+class QuoteSpark {
+  constructor(canvas, maxPts = 200) {
+    this.el = typeof canvas === 'string' ? $(canvas) : canvas;
+    this.max = maxPts;
+    this.series = { bid: [], ask: [], iBid: [], iAsk: [], micro: [] };
+  }
+  push(bid, ask, iBid, iAsk, micro) {
+    for (const [k, v] of Object.entries({ bid, ask, iBid, iAsk, micro })) {
+      this.series[k].push(v);
+      if (this.series[k].length > this.max) this.series[k].shift();
+    }
+  }
+  draw() {
+    const c = this.el, g = c.getContext('2d');
+    const w = c.width = c.clientWidth * devicePixelRatio;
+    const h = c.height = c.clientHeight * devicePixelRatio;
+    g.scale(devicePixelRatio, devicePixelRatio);
+    const W = c.clientWidth, H = c.clientHeight;
+    g.clearRect(0, 0, W, H);
+    const all = [...this.series.bid, ...this.series.ask, ...this.series.micro].filter(v => v > 0);
+    if (all.length < 2) return;
+    let lo = Math.min(...all), hi = Math.max(...all);
+    const span = hi - lo || 1;
+    lo -= span * 0.05; hi += span * 0.05;
+    const dx = W / (this.max - 1);
+
+    const drawLine = (data, color, width = 1, dash = []) => {
+      g.beginPath(); g.setLineDash(dash); g.strokeStyle = color; g.lineWidth = width;
+      let started = false;
+      for (let i = 0; i < data.length; i++) {
+        if (data[i] <= 0) { started = false; continue; }
+        const x = W - (data.length - 1 - i) * dx;
+        const y = H - ((data[i] - lo) / (hi - lo)) * (H - 4) - 2;
+        started ? g.lineTo(x, y) : g.moveTo(x, y); started = true;
+      }
+      g.stroke(); g.setLineDash([]);
+    };
+
+    drawLine(this.series.bid, 'rgba(63,185,80,.5)', 1);
+    drawLine(this.series.ask, 'rgba(248,81,73,.5)', 1);
+    drawLine(this.series.iBid, 'rgba(63,185,80,.25)', 1, [4, 4]);
+    drawLine(this.series.iAsk, 'rgba(248,81,73,.25)', 1, [4, 4]);
+    drawLine(this.series.micro, 'rgba(88,166,255,.8)', 1.5);
+  }
+}
+let sparkQuotes; // initialized after DOM ready
+
+// ══════════════════════════════════════════════════════════════════════
+// PARTICLE SYSTEM (idle game feel)
+// ══════════════════════════════════════════════════════════════════════
+const particles = [];
+class Particle {
+  constructor(x, y, color, vx, vy, life, size) {
+    this.x = x; this.y = y; this.color = color;
+    this.vx = vx; this.vy = vy;
+    this.life = life; this.maxLife = life; this.size = size;
+  }
+  update(dt) {
+    this.x += this.vx * dt; this.y += this.vy * dt;
+    this.vy += 20 * dt; // gravity
+    this.life -= dt;
+  }
+  draw(g) {
+    const a = Math.max(0, this.life / this.maxLife);
+    g.globalAlpha = a * 0.7;
+    g.fillStyle = this.color;
+    g.beginPath();
+    g.arc(this.x, this.y, this.size * a, 0, Math.PI * 2);
+    g.fill();
+    g.globalAlpha = 1;
+  }
+}
+
+function spawnParticles(x, y, color, count = 12) {
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 30 + Math.random() * 80;
+    particles.push(new Particle(x, y, color,
+      Math.cos(angle) * speed, Math.sin(angle) * speed - 40,
+      0.5 + Math.random() * 0.8, 2 + Math.random() * 3));
+  }
+}
+
+// ── Floating Text (XP gains, level ups) ──
+const floatingTexts = [];
+class FloatingText {
+  constructor(x, y, text, color, size = 14) {
+    this.x = x; this.y = y; this.text = text; this.color = color;
+    this.size = size; this.life = 1.5; this.maxLife = 1.5;
+    this.vy = -40 - Math.random() * 20;
+    this.vx = (Math.random() - 0.5) * 30;
+  }
+  update(dt) { this.x += this.vx * dt; this.y += this.vy * dt; this.vy += 5 * dt; this.life -= dt; }
+  draw(g) {
+    const a = Math.max(0, this.life / this.maxLife);
+    g.globalAlpha = a; g.fillStyle = this.color;
+    g.font = `bold ${this.size}px Mono, monospace`;
+    g.fillText(this.text, this.x, this.y);
+    g.globalAlpha = 1;
+  }
+}
+function spawnText(x, y, text, color, size) {
+  floatingTexts.push(new FloatingText(x, y, text, color, size));
+}
+
+let lastParticleTs = performance.now();
+function tickParticles() {
+  const now = performance.now();
+  const dt = Math.min(0.05, (now - lastParticleTs) / 1000);
+  lastParticleTs = now;
+  const c = $('particles');
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, c.width, c.height);
+  // Particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    particles[i].update(dt);
+    if (particles[i].life <= 0) { particles.splice(i, 1); continue; }
+    particles[i].draw(g);
+  }
+  // Floating texts
+  for (let i = floatingTexts.length - 1; i >= 0; i--) {
+    floatingTexts[i].update(dt);
+    if (floatingTexts[i].life <= 0) { floatingTexts.splice(i, 1); continue; }
+    floatingTexts[i].draw(g);
+  }
+  requestAnimationFrame(tickParticles);
+}
+tickParticles();
+
+// ══════════════════════════════════════════════════════════════════════
+// ACHIEVEMENTS (idle game)
+// ══════════════════════════════════════════════════════════════════════
+const ACHIEVEMENTS = [
+  { id: 'first_tick', icon: '📡', name: 'First Tick', desc: 'Receive first market data', check: () => S.frames > 0 },
+  { id: 'warm', icon: '🔥', name: 'Warmed Up', desc: 'Engine warm (50+ samples)', check: () => S.samples >= 50 },
+  { id: 'fill_1', icon: '💰', name: 'First Fill', desc: '1 phantom fill', check: () => S.fills >= 1 },
+  { id: 'fill_10', icon: '💎', name: 'Ten Fills', desc: '10 phantom fills', check: () => S.fills >= 10 },
+  { id: 'profit_1', icon: '📈', name: 'In The Green', desc: 'Positive phantom P&L', check: () => S.totalPnl > 0 },
+  { id: 'profit_10', icon: '🏆', name: 'Big Winner', desc: 'P&L > $10', check: () => S.totalPnl > 10 },
+  { id: 'vol_high', icon: '🌋', name: 'Volatility Hunter', desc: 'Detect high vol regime', check: () => S.regime >= 2 },
+  { id: 'vol_extreme', icon: '☄️', name: 'Apocalypse', desc: 'Extreme vol regime', check: () => S.regime >= 3 },
+  { id: 'ofi_strong', icon: '🌊', name: 'Tidal Wave', desc: 'OFI > 0.5', check: () => Math.abs(S.ofiNorm) > 0.5 },
+  { id: 'momentum', icon: '🚀', name: 'Rocket Fuel', desc: 'Strong momentum signal', check: () => Math.abs(S.momentum) > 5 },
+  { id: 'zscore', icon: '🎯', name: 'Sharpshooter', desc: 'Z-score > 2', check: () => Math.abs(S.zScore) > 2 },
+  { id: 'frames_1k', icon: '⚡', name: 'Overclocked', desc: '1000+ frames processed', check: () => S.frames > 1000 },
+  { id: 'frames_10k', icon: '🔮', name: 'Oracle', desc: '10K+ frames', check: () => S.frames > 10000 },
+  { id: 'level_5', icon: '⭐', name: 'Rising Star', desc: 'Reach level 5', check: () => S.level >= 5 },
+  { id: 'level_10', icon: '👑', name: 'Market Maker', desc: 'Reach level 10', check: () => S.level >= 10 },
+  { id: 'spread_tight', icon: '🎯', name: 'Tight Spread', desc: 'Spread ratio < 0.7', check: () => S.spreadRatio > 0 && S.spreadRatio < 0.7 },
+];
+
+function checkAchievements() {
+  let newUnlocks = [];
+  for (const a of ACHIEVEMENTS) {
+    if (S.achievements[a.id]) continue;
+    if (a.check()) {
+      S.achievements[a.id] = true;
+      newUnlocks.push(a);
+      addXP(25);
+      addTape('ACHIEVEMENT', '', `${a.icon} ${a.name}`);
+      // big particle burst
+      spawnParticles(innerWidth / 2, innerHeight / 2, '#e3b341', 30);
+    }
+  }
+  renderAchievements();
+}
+
+function renderAchievements() {
+  const el = $('achievements');
+  el.innerHTML = ACHIEVEMENTS.map(a => {
+    const unlocked = !!S.achievements[a.id];
+    return `<span class="achievement ${unlocked ? 'unlocked' : ''}" title="${a.desc}"><span class="icon">${a.icon}</span>${a.name}</span>`;
+  }).join('');
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// XP / LEVEL SYSTEM (idle game)
+// ══════════════════════════════════════════════════════════════════════
+function addXP(n) {
+  S.xp += n;
+  S.score += n;
+  // Floating XP text near the XP bar
+  try {
+    const barRect = $('xp-fill').getBoundingClientRect();
+    spawnText(barRect.right - 30, barRect.top - 5, `+${n} XP`, '#bc8cff', 12);
+  } catch {}
+  while (S.xp >= S.xpToNext) {
+    S.xp -= S.xpToNext;
+    S.level++;
+    S.xpToNext = Math.floor(100 * Math.pow(1.5, S.level - 1));
+    addTape('LEVEL UP', '', `Level ${S.level}!`);
+    spawnParticles(innerWidth / 2, 30, '#e3b341', 25);
+    spawnText(innerWidth / 2 - 40, 50, `★ LEVEL ${S.level} ★`, '#e3b341', 18);
+  }
+  $('level').textContent = `LV ${S.level}`;
+  $('xp-fill').style.width = `${(S.xp / S.xpToNext * 100).toFixed(1)}%`;
+  $('xp-label').textContent = `${S.xp} / ${S.xpToNext} XP`;
+  $('score').textContent = S.score.toLocaleString();
+  $('combo').textContent = S.combo > 0 ? `×${S.combo}` : '0';
+  $('combo').style.color = S.combo >= 5 ? '#e3b341' : S.combo >= 3 ? '#f778ba' : S.combo > 0 ? '#bc8cff' : '#7d8590';
+  $('streak').textContent = S.bestStreak > 0 ? `${S.bestStreak} best` : '0';
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 10 TRADING IMPROVEMENTS (computed in-engine, displayed here)
+// ══════════════════════════════════════════════════════════════════════
+const IMPROVEMENTS = [
+  { id: 'adaptive', name: '1. Adaptive Sizing', desc: 'Scale quote size by vol regime',
+    value: () => ['Low×0.7', 'Med×1.0', 'High×1.5', 'Extreme×2.5'][S.regime] || '—',
+    active: () => S.samples >= CFG.warmupSamples },
+  { id: 'ofi_skew', name: '2. OFI-Aware Skew', desc: 'Shift quotes with order flow',
+    value: () => S.ofiNorm > 0.1 ? `BID +${(S.ofiNorm*100).toFixed(0)}%` : S.ofiNorm < -0.1 ? `ASK +${(-S.ofiNorm*100).toFixed(0)}%` : 'Neutral',
+    active: () => Math.abs(S.ofiNorm) > 0.05 },
+  { id: 'momentum', name: '3. Momentum Filter', desc: 'Don\'t trade against trend',
+    value: () => S.momentum > 0.5 ? '↑ Uptrend' : S.momentum < -0.5 ? '↓ Downtrend' : '→ Flat',
+    active: () => Math.abs(S.momentum) > 0.5 },
+  { id: 'zscore', name: '4. Z-Score Entry', desc: 'Mean-reversion signals',
+    value: () => S.zScore > 1.5 ? 'OVERBOUGHT' : S.zScore < -1.5 ? 'OVERSOLD' : `z=${S.zScore.toFixed(2)}`,
+    active: () => Math.abs(S.zScore) > 1 },
+  { id: 'spread_gate', name: '5. Spread Quality Gate', desc: 'Only quote tight spreads',
+    value: () => S.spreadRatio < 0.8 ? 'TIGHT ✓' : S.spreadRatio > 1.5 ? 'LOOSE ✗' : 'Normal',
+    active: () => S.spreadRatio > 0 },
+  { id: 'inv_penalty', name: '6. Inventory Penalty', desc: 'Widen quotes near position limit',
+    value: () => `${(Math.abs(S.pos)/CFG.maxPos*100).toFixed(0)}% utilized`,
+    active: () => Math.abs(S.pos) > CFG.maxPos * 0.3 },
+  { id: 'phantom_pnl', name: '7. Phantom P&L', desc: 'Track hypothetical performance',
+    value: () => `$${S.totalPnl.toFixed(2)}`,
+    active: () => S.fills > 0 },
+  { id: 'fill_track', name: '8. Fill Rate Tracking', desc: 'Win rate of phantom trades',
+    value: () => S.fills > 0 ? `${((S.wins/Math.max(1,S.fills))*100).toFixed(0)}% WR` : 'No fills yet',
+    active: () => S.fills > 0 },
+  { id: 'latency', name: '9. Latency Adapt', desc: 'Requote timing by lag',
+    value: () => S.lastFrameNs > 0 ? `${(S.lagNs/1e6||0).toFixed(1)}ms` : '—',
+    active: () => S.lastFrameNs > 0 },
+  { id: 'regime', name: '10. Vol Regime Detect', desc: 'Low/Med/High/Extreme',
+    value: () => ['🟢 LOW', '🟡 MED', '🔴 HIGH', '☄️ EXTREME'][S.regime] || '—',
+    active: () => S.samples >= CFG.warmupSamples },
+];
+
+function renderImprovements() {
+  const el = $('improvements');
+  el.innerHTML = IMPROVEMENTS.map(imp => {
+    const active = imp.active();
+    return `<div class="metric" style="opacity:${active ? 1 : 0.4}">
+      <span class="k" title="${imp.desc}">${imp.name}</span>
+      <span class="v ${active ? 'cyan' : ''}">${imp.value()}</span>
+    </div>`;
+  }).join('');
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// QUOTER ENGINE (mirrors Gemx/Signals.cs + Quoter.Compute)
+// ══════════════════════════════════════════════════════════════════════
+function floorTick(x, tick) { return Math.floor(x / tick) * tick; }
+function ceilTick(x, tick) { return Math.ceil(x / tick) * tick; }
+
+function computeQuotes() {
+  const sigma = Math.sqrt(Math.max(0, S.sigma2));
+  const lagSec = (S.lagNs || 0) * 1e-9 + CFG.rttSec;
+
+  // Improvement #6: regime-scaled horizon
+  const regimeScales = [0.7, 1.0, 1.5, 2.5];
+  const effHorizon = CFG.horizonSec * (regimeScales[S.regime] || 1);
+
+  let half = 0.5 * CFG.gamma * S.sigma2 * effHorizon
+           + Math.log(1 + CFG.gamma / CFG.k) / CFG.gamma
+           + sigma * Math.sqrt(lagSec);
+
+  const floor = (S.micro || 0) * CFG.makerFeeBps * 1e-4 + CFG.minEdgeTicks * CFG.tickSize;
+  if (half < floor) half = floor;
+
+  // Improvement #8: spread quality gate
+  if (S.spreadRatio < 0.8) half *= 0.85;
+  else if (S.spreadRatio > 1.5) half *= 1.2;
+
+  const drift = CFG.alpha * S.ofiNorm;
+  const invPenalty = S.pos * CFG.gamma * S.sigma2 * effHorizon;
+  let r = (S.micro || 0) + drift - invPenalty;
+
+  // Improvement #9: momentum skew
+  r += S.momentum * 0.001;
+
+  const bidPx = floorTick(r - half, CFG.tickSize);
+  const askPx = ceilTick(r + half, CFG.tickSize);
+
+  const maxBid = S.bid > 0 ? S.bid : 0;
+  const minAsk = S.ask > 0 ? S.ask : Infinity;
+
+  return {
+    intendedBid: Math.max(0, bidPx),
+    intendedAsk: Math.max(bidPx + CFG.tickSize, askPx),
+    halfSpread: half,
+    reservation: r,
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// PHANTOM TRADE ENGINE
+// ══════════════════════════════════════════════════════════════════════
+function updatePhantomTrades(now) {
+  if (!S.bid || !S.ask || S.samples < CFG.warmupSamples) return;
+
+  const q = computeQuotes();
+  const bidPx = q.intendedBid;
+  const askPx = q.intendedAsk;
+
+  // Check if our phantom bid would fill (market traded through our bid)
+  if (S.bidOrder && S.bid <= S.bidOrder.px) {
+    // FILL on bid side
+    const oldPos = S.pos;
+    S.pos += CFG.quoteQty;
+    S.fills++;
+    S.avgEntry = S.micro;
+    S.lastFillPx = S.bidOrder.px;
+    S.combo++;
+    if (S.combo > S.maxCombo) S.maxCombo = S.combo;
+    addXP(10 + S.combo * 2); // combo bonus
+    addTape('PHANTOM BUY', '$' + S.bidOrder.px.toFixed(2), '+' + CFG.quoteQty + ' \u2192 pos ' + S.pos.toFixed(6) + (S.combo > 1 ? ' \u00d7' + S.combo + ' COMBO' : ''));
+    const el = document.querySelector('.ladder');
+    if (el) spawnParticles(el.getBoundingClientRect().left + 50, el.getBoundingClientRect().top + 40, '#3fb950', 8);
+    S.bidOrder = null;
+    S.bidLive = false;
+  }
+
+  // Check if our phantom ask would fill
+  if (S.askOrder && S.ask >= S.askOrder.px) {
+    // FILL on ask side
+    const oldPos = S.pos;
+    S.pos -= CFG.quoteQty;
+    S.fills++;
+    // P&L on this fill
+    if (S.avgEntry > 0) {
+      const pnl = (S.askOrder.px - S.avgEntry) * CFG.quoteQty;
+      S.totalPnl += pnl;
+      S.edgeAccum += S.askOrder.px - S.avgEntry;
+      if (pnl > 0) {
+        S.wins++;
+        S.streak++;
+        if (S.streak > S.bestStreak) S.bestStreak = S.streak;
+        S.combo++;
+        if (S.combo > S.maxCombo) S.maxCombo = S.combo;
+        addXP(15 + S.combo * 3);
+      } else {
+        S.losses++;
+        S.streak = 0;
+        S.combo = 0;
+        addXP(5);
+      }
+      if (pnl > S.bestTrade) S.bestTrade = pnl;
+      if (pnl < S.worstTrade) S.worstTrade = pnl;
+      addTape('PHANTOM SELL', '$' + S.askOrder.px.toFixed(2), '-' + CFG.quoteQty + ' \u2192 pos ' + S.pos.toFixed(6) + ' | P&L $' + pnl.toFixed(4) + (S.combo > 1 ? ' \u00d7' + S.combo + ' COMBO' : ''));
+    }
+    const el = document.querySelector('.ladder');
+    if (el) spawnParticles(el.getBoundingClientRect().left + 200, el.getBoundingClientRect().top + 40, '#f85149', 8);
+    S.askOrder = null;
+    S.askLive = false;
+  }
+
+  // Place new phantom orders if conditions allow
+  const canBuy = S.pos + CFG.quoteQty <= CFG.maxPos;
+  const canSell = S.pos - CFG.quoteQty >= -CFG.maxPos;
+
+  if (!S.bidLive && canBuy && bidPx > 0) {
+    S.bidOrder = { px: bidPx, qty: CFG.quoteQty, ts: now };
+    S.bidLive = true;
+  }
+  if (!S.askLive && canSell && askPx > 0) {
+    S.askOrder = { px: askPx, qty: CFG.quoteQty, ts: now };
+    S.askLive = true;
+  }
+
+  // Requote if price moved
+  if (S.bidLive && S.bidOrder && Math.abs(bidPx - S.bidOrder.px) >= CFG.tickSize * 2) {
+    S.bidOrder = { px: bidPx, qty: CFG.quoteQty, ts: now };
+  }
+  if (S.askLive && S.askOrder && Math.abs(askPx - S.askOrder.px) >= CFG.tickSize * 2) {
+    S.askOrder = { px: askPx, qty: CFG.quoteQty, ts: now };
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// TAPE
+// ══════════════════════════════════════════════════════════════════════
+function addTape(type, price, info) {
+  S.tape.push({ ts: Date.now(), type, price, info });
+  if (S.tape.length > 100) S.tape.shift();
+  renderTape();
+}
+
+function renderTape() {
+  const el = $('tape');
+  el.innerHTML = S.tape.slice(-20).reverse().map(t => {
+    const cls = t.type.includes('BUY') ? 'buy' : t.type.includes('SELL') ? 'sell' : '';
+    const time = new Date(t.ts).toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    return `<div class="tape-row ${cls}"><span>${time}</span><span>${t.type}</span><span>${t.price} ${t.info}</span></div>`;
+  }).join('');
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// ORDER BOOK (from best bid/ask depth)
+// ══════════════════════════════════════════════════════════════════════
+function renderLadder() {
+  const el = $('ladder-body');
+  const q = computeQuotes();
+  const rows = [];
+  // Show 5 levels of asks (reversed) + 5 levels of bids
+  const askLevels = S.book.asks.slice(0, 5).reverse();
+  const bidLevels = S.book.bids.slice(0, 5);
+
+  for (const a of askLevels) {
+    const isOurs = S.askLive && S.askOrder && Math.abs(a.px - S.askOrder.px) < CFG.tickSize;
+    const pct = a.qty / 10 * 100;
+    rows.push(`<div class="ladder-row ask ${isOurs ? 'our' : ''}" style="font-size:10px">
+      <span></span><span></span><span style="color:var(--red)">${a.px.toFixed(2)}</span>
+      <span>${a.qty.toFixed(4)}</span>
+      <div class="bar" style="width:${Math.min(100, pct)}%;right:0;background:var(--red);opacity:.1"></div>
+    </div>`);
+  }
+
+  // spread row
+  if (S.bid && S.ask) {
+    rows.push(`<div style="text-align:center;font-size:9px;color:var(--dim);padding:2px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+      ◆ ${(S.ask - S.bid).toFixed(2)} spread (${((S.ask - S.bid) / CFG.tickSize).toFixed(0)} ticks)
+    </div>`);
+  }
+
+  for (const b of bidLevels) {
+    const isOurs = S.bidLive && S.bidOrder && Math.abs(b.px - S.bidOrder.px) < CFG.tickSize;
+    const pct = b.qty / 10 * 100;
+    rows.push(`<div class="ladder-row bid ${isOurs ? 'our' : ''}" style="font-size:10px">
+      <span>${b.qty.toFixed(4)}</span><span style="color:var(--green)">${b.px.toFixed(2)}</span>
+      <span></span><span></span>
+      <div class="bar" style="width:${Math.min(100, pct)}%;left:0;background:var(--green);opacity:.1"></div>
+    </div>`);
+  }
+  el.innerHTML = rows.join('');
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// SIGNAL PROCESSING (mirrors Gemx/Signals.cs)
+// ══════════════════════════════════════════════════════════════════════
+function processTick(ns, bidPx, bidQty, askPx, askQty) {
+  const mid = 0.5 * (bidPx + askPx);
+  const tot = bidQty + askQty;
+  S.micro = tot > 0 ? (bidPx * askQty + askPx * bidQty) / tot : mid;
+
+  if (!S.init) {
+    S.init = true;
+    S.gridNs = ns;
+    S.gridMid = mid;
+    S.avgSize = 0.5 * tot;
+    S.emaFast = mid;
+    S.emaSlow = mid;
+    S.avgSpread = askPx - bidPx;
+    S.sigmaEma = 0;
+  } else {
+    const dt = Math.max(0, (ns - S.lastNs) * 1e-9);
+    const decay = Math.exp(-dt / CFG.ofiTauSec);
+
+    // OFI
+    const e = (bidPx >= S.prevBid ? bidQty : 0)
+            - (bidPx <= S.prevBid ? S.prevBidQty : 0)
+            - (askPx <= S.prevAsk ? askQty : 0)
+            + (askPx >= S.prevAsk ? S.prevAskQty : 0);
+    S.prevOfiNorm = S.ofiNorm;
+    S.ofi = S.ofi * decay + e;
+    S.avgSize += (1 - decay) * (0.5 * tot - S.avgSize);
+    S.ofiNorm = S.avgSize > 0 ? S.ofi / S.avgSize : 0;
+    S.ofiAccel = S.ofiNorm - S.prevOfiNorm;
+
+    // Momentum (dual EMA)
+    const alphaFast = 1 - Math.exp(-dt / 5.0);
+    const alphaSlow = 1 - Math.exp(-dt / 20.0);
+    S.emaFast += alphaFast * (mid - S.emaFast);
+    S.emaSlow += alphaSlow * (mid - S.emaSlow);
+    S.momentum = S.emaFast - S.emaSlow;
+
+    // Spread ratio
+    const sp = askPx - bidPx;
+    const spAlpha = 1 - Math.exp(-dt / 10.0);
+    S.avgSpread += spAlpha * (sp - S.avgSpread);
+    S.spreadRatio = S.avgSpread > 0 ? sp / S.avgSpread : 1;
+
+    // Grid-based volatility
+    const stepNs = CFG.gridSec * 1e9;
+    const k = Math.floor((ns - S.gridNs) / stepNs);
+    if (k >= 1) {
+      const ret = mid - S.gridMid;
+      const lambda = 1 - Math.pow(2, -CFG.gridSec / CFG.volHalfLifeSec);
+      const s2prev = S.sigma2 * Math.pow(1 - lambda, k - 1);
+      S.sigma2 = (1 - lambda) * s2prev + lambda * ret * ret / CFG.gridSec;
+      S.gridNs += k * stepNs;
+      S.gridMid = mid;
+      S.samples += k;
+
+      // Z-score
+      const sigma = Math.sqrt(Math.max(1e-20, S.sigma2));
+      if (sigma > 1e-10) {
+        S.zScore = ret / sigma; // simplified: return vs vol
+      }
+    }
+
+    // Vol regime
+    const sigmaNow = Math.sqrt(Math.max(0, S.sigma2));
+    const regAlpha = 1 - Math.exp(-dt / 60.0);
+    S.sigmaEma += regAlpha * (sigmaNow - S.sigmaEma);
+    if (S.sigmaEma > 1e-10) {
+      const ratio = sigmaNow / S.sigmaEma;
+      S.regime = ratio < 0.7 ? 0 : ratio < 1.3 ? 1 : ratio < 2.0 ? 2 : 3;
+    }
+  }
+
+  S.prevBid = bidPx; S.prevBidQty = bidQty;
+  S.prevAsk = askPx; S.prevAskQty = askQty;
+  S.mid = mid;
+  S.lastNs = ns;
+
+  // History
+  S.priceHistory.push(mid);
+  if (S.priceHistory.length > 200) S.priceHistory.shift();
+  S.sigmaHistory.push(Math.sqrt(Math.max(0, S.sigma2)));
+  if (S.sigmaHistory.length > 200) S.sigmaHistory.shift();
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// UI RENDER
+// ══════════════════════════════════════════════════════════════════════
+function renderUI() {
+  // Price
+  const priceEl = $('big-price');
+  if (S.mid > 0) {
+    priceEl.textContent = `$${S.mid.toFixed(2)}`;
+    priceEl.className = `big-price ${S.momentum > 0.3 ? 'up' : S.momentum < -0.3 ? 'down' : 'flat'}`;
+  }
+
+  // Sub-price
+  $('spread-val').textContent = S.bid && S.ask ? `Spread: ${(S.ask - S.bid).toFixed(2)}` : '—';
+  $('mid-val').textContent = S.micro > 0 ? `Micro: ${S.micro.toFixed(2)}` : '';
+
+  // Symbol
+  $('sym').textContent = CFG.symbol.toUpperCase();
+
+  // Connection
+  $('conn-md').className = `conn-dot ${wsReady ? 'ok' : wsErr ? 'err' : 'connecting'}`;
+
+  // State pill
+  const warm = S.samples >= CFG.warmupSamples;
+  const stateText = !wsReady ? 'OFFLINE' : !warm ? 'WARMING' : 'LIVE';
+  const stateColor = !wsReady ? 'var(--red)' : !warm ? 'var(--orange)' : 'var(--green)';
+  $('state-pill').textContent = stateText;
+  $('state-pill').style.background = stateColor;
+  $('state-pill').style.color = 'white';
+
+  // Metrics
+  $('sigma').textContent = S.sigma2 > 0 ? Math.sqrt(S.sigma2).toFixed(4) : '—';
+  const ofiEl = $('ofi');
+  ofiEl.textContent = S.ofiNorm.toFixed(3) + (S.ofiNorm > 0.3 ? ' ▲ BID' : S.ofiNorm < -0.3 ? ' ▼ ASK' : '');
+  ofiEl.className = `v ${S.ofiNorm > 0.3 ? 'green' : S.ofiNorm < -0.3 ? 'red' : ''}`;
+  $('ofi-accel').textContent = S.ofiAccel.toFixed(4);
+  $('ofi-accel').className = `v ${S.ofiAccel > 0 ? 'green' : S.ofiAccel < 0 ? 'red' : ''}`;
+  $('momentum').textContent = S.momentum.toFixed(4);
+  $('momentum').className = `v ${S.momentum > 0 ? 'green' : S.momentum < 0 ? 'red' : ''}`;
+  $('zscore').textContent = S.zScore.toFixed(3);
+  $('zscore').className = `v ${Math.abs(S.zScore) > 1.5 ? 'orange' : Math.abs(S.zScore) > 1 ? 'cyan' : ''}`;
+  $('spread-ratio').textContent = S.spreadRatio.toFixed(3);
+  $('spread-ratio').className = `v ${S.spreadRatio < 0.8 ? 'green' : S.spreadRatio > 1.5 ? 'red' : ''}`;
+  $('spread-quality').textContent = S.avgSpread.toFixed(2);
+  $('lag').textContent = S.lastFrameNs > 0 ? `${((performance.now() - S.lastRenderTs) || 0).toFixed(0)}ms` : '—';
+  $('pos').textContent = S.pos.toFixed(6);
+  $('pos').className = `v ${Math.abs(S.pos) > CFG.maxPos * 0.8 ? 'red' : Math.abs(S.pos) > CFG.maxPos * 0.5 ? 'orange' : 'cyan'}`;
+
+  // Regime
+  const regimeNames = ['LOW', 'MED', 'HIGH', 'EXTREME'];
+  const regimeClasses = ['low', 'med', 'high', 'extreme'];
+  $('regime').textContent = regimeNames[S.regime];
+  $('regime').className = `regime ${regimeClasses[S.regime]}`;
+
+  // Signal bars
+  const ofiPct = Math.min(100, Math.abs(S.ofiNorm) * 100);
+  $('bar-ofi').style.width = `${ofiPct}%`;
+  $('bar-ofi').style.background = S.ofiNorm > 0 ? 'var(--green)' : S.ofiNorm < 0 ? 'var(--red)' : 'var(--dim)';
+
+  const momPct = Math.min(100, Math.abs(S.momentum) * 10);
+  $('bar-mom').style.width = `${momPct}%`;
+  $('bar-mom').style.background = S.momentum > 0 ? 'var(--green)' : S.momentum < 0 ? 'var(--red)' : 'var(--dim)';
+
+  const zPct = Math.min(100, Math.abs(S.zScore) * 25);
+  $('bar-z').style.width = `${zPct}%`;
+  $('bar-z').style.background = Math.abs(S.zScore) > 1.5 ? 'var(--orange)' : Math.abs(S.zScore) > 1 ? 'var(--cyan)' : 'var(--dim)';
+
+  const invPct = Math.min(100, Math.abs(S.pos) / CFG.maxPos * 100);
+  $('bar-inv').style.width = `${invPct}%`;
+  $('bar-inv').style.background = invPct > 80 ? 'var(--red)' : invPct > 50 ? 'var(--orange)' : 'var(--green)';
+
+  // Stats
+  $('fills').textContent = S.fills;
+  const pnlEl = $('pnl');
+  pnlEl.textContent = `$${S.totalPnl.toFixed(2)}`;
+  pnlEl.className = `v ${S.totalPnl >= 0 ? 'green' : 'red'}`;
+  $('winrate').textContent = S.fills > 0 ? `${((S.wins / Math.max(1, S.fills)) * 100).toFixed(0)}%` : '—';
+  $('best-trade').textContent = `$${S.bestTrade.toFixed(4)}`;
+  $('worst-trade').textContent = `$${S.worstTrade.toFixed(4)}`;
+  $('avg-edge').textContent = S.fills > 0 ? `$${(S.edgeAccum / S.fills).toFixed(4)}` : '—';
+  $('frames').textContent = S.frames.toLocaleString();
+
+  // FPS
+  $('fps-metric').textContent = S.fps.toFixed(0);
+  $('fps').textContent = `${S.fps.toFixed(0)} fps`;
+
+  // Uptime
+  const up = Math.floor((Date.now() - S.startTime) / 1000);
+  const h = String(Math.floor(up / 3600)).padStart(2, '0');
+  const m = String(Math.floor((up % 3600) / 60)).padStart(2, '0');
+  const sec = String(up % 60).padStart(2, '0');
+  $('uptime').textContent = `${h}:${m}:${sec}`;
+
+  // Phantom zone
+  renderPhantomZone();
+
+  // Improvements
+  renderImprovements();
+
+  // Ladder
+  renderLadder();
+
+  // Sparklines
+  sparkPrice.data = S.priceHistory;
+  sparkPrice.draw();
+  sparkSigma.data = S.sigmaHistory;
+  sparkSigma.draw();
+
+  // Quote sparkline
+  if (sparkQuotes) {
+    const q = S.samples >= CFG.warmupSamples ? computeQuotes() : null;
+    sparkQuotes.push(S.bid || 0, S.ask || 0, q ? q.intendedBid : 0, q ? q.intendedAsk : 0, S.micro || 0);
+    sparkQuotes.draw();
+  }
+
+  // Energy bar (warmup progress)
+  const energyPct = Math.min(100, (S.samples / CFG.warmupSamples) * 100);
+  $('energy-bar').style.width = `${energyPct}%`;
+  $('energy-label').textContent = `${Math.min(S.samples, CFG.warmupSamples)} / ${CFG.warmupSamples} samples${S.samples >= CFG.warmupSamples ? ' ✓ READY' : ''}`;
+  $('energy-bar').style.background = energyPct >= 100
+    ? 'linear-gradient(90deg, var(--green), var(--cyan))'
+    : 'linear-gradient(90deg, var(--purple), var(--accent))';
+
+  S.lastRenderTs = performance.now();
+}
+
+function renderPhantomZone() {
+  const el = $('phantom-zone');
+  const q = S.samples >= CFG.warmupSamples ? computeQuotes() : null;
+  let html = '';
+
+  // Current phantom bid
+  if (S.bidLive && S.bidOrder) {
+    html += '<div class="phantom buy"><span class="px">BID $' + S.bidOrder.px.toFixed(2) + '</span> <span class="qty">\u00d7 ' + S.bidOrder.qty + '</span><div class="reason">Would buy if you had funds \u2022 Fills when market drops to this price</div></div>';
+  } else if (q && S.pos + CFG.quoteQty <= CFG.maxPos) {
+    html += '<div class="phantom idle"><span class="px">BID $' + q.intendedBid.toFixed(2) + '</span> <span class="qty">\u00d7 ' + CFG.quoteQty + '</span><div class="reason">Ready to place \u2022 Waiting for conditions</div></div>';
+  } else {
+    html += '<div class="phantom idle"><span class="px">BID \u2014</span><div class="reason">' + (!q ? 'Warming up...' : 'Position limit reached') + '</div></div>';
+  }
+
+  // Current phantom ask
+  if (S.askLive && S.askOrder) {
+    html += '<div class="phantom sell"><span class="px">ASK $' + S.askOrder.px.toFixed(2) + '</span> <span class="qty">\u00d7 ' + S.askOrder.qty + '</span><div class="reason">Would sell if you had inventory \u2022 Fills when market rises to this price</div></div>';
+  } else if (q && S.pos - CFG.quoteQty >= -CFG.maxPos) {
+    html += '<div class="phantom idle"><span class="px">ASK $' + q.intendedAsk.toFixed(2) + '</span> <span class="qty">\u00d7 ' + CFG.quoteQty + '</span><div class="reason">Ready to place \u2022 Waiting for conditions</div></div>';
+  } else {
+    html += '<div class="phantom idle"><span class="px">ASK \u2014</span><div class="reason">' + (!q ? 'Warming up...' : 'No inventory to sell / position limit') + '</div></div>';
+  }
+
+  // Reservation price
+  if (q) {
+    html += '<div style="font-size:9px;color:var(--dim);margin-top:4px">Reservation: $' + q.reservation.toFixed(2) + ' \u00b7 Half-spread: $' + q.halfSpread.toFixed(4) + '</div>';
+  }
+
+  el.innerHTML = html;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// WEBSOCKET CONNECTION — Gemini v2 / ws.gemini.com
+// ══════════════════════════════════════════════════════════════════════
+let ws, wsReady = false, wsErr = false;
+
+function connect() {
+  const sym = CFG.symbol.toLowerCase();
+  // Gemini ws.gemini.com — Binance-compatible subscription envelope
+  ws = new WebSocket('wss://ws.gemini.com');
+
+  ws.onopen = () => {
+    wsReady = true; wsErr = false;
+    // Subscribe to bookTicker (best bid/ask) and depth (L2 diff)
+    ws.send(JSON.stringify({
+      id: String(Date.now()),
+      method: 'SUBSCRIBE',
+      params: [`${sym}@bookTicker`, `${sym}@depth@100ms`]
+    }));
+    addTape('CONNECT', '', 'WebSocket connected to Gemini');
+    addXP(5);
+  };
+
+  ws.onmessage = (evt) => {
+    try {
+      const data = JSON.parse(evt.data);
+      handleMessage(data);
+    } catch (e) { S.fails++; }
+  };
+
+  ws.onerror = () => { wsErr = true; };
+  ws.onclose = () => {
+    wsReady = false;
+    setTimeout(connect, 2000);
+  };
+}
+
+function handleMessage(data) {
+  S.frames++;
+  const ns = performance.now() * 1e6;
+
+  // ── bookTicker: { u, E, s, b, B, a, A } ──
+  if (data.b !== undefined && data.a !== undefined && data.s) {
+    const bidPx = parseFloat(data.b);
+    const bidQty = parseFloat(data.B);
+    const askPx = parseFloat(data.a);
+    const askQty = parseFloat(data.A);
+
+    if (bidPx > 0 && askPx > 0) {
+      // Direct top-of-book update
+      S.bid = bidPx; S.bidQty = bidQty;
+      S.ask = askPx; S.askQty = askQty;
+
+      // Ensure book top matches
+      if (S.book.bids.length === 0 || S.book.bids[0].px !== bidPx) {
+        updateBook('bid', bidPx, bidQty);
+      } else {
+        S.book.bids[0].qty = bidQty;
+      }
+      if (S.book.asks.length === 0 || S.book.asks[0].px !== askPx) {
+        updateBook('ask', askPx, askQty);
+      } else {
+        S.book.asks[0].qty = askQty;
+      }
+
+      processTick(ns, bidPx, bidQty, askPx, askQty);
+      updatePhantomTrades(performance.now());
+    }
+  }
+
+  // ── depthUpdate: { e:"depthUpdate", E, s, U, u, b:[[px,qty],...], a:[[px,qty],...] } ──
+  if (data.e === 'depthUpdate' && data.b && data.a) {
+    for (const [pxStr, qtyStr] of data.b) {
+      updateBook('bid', parseFloat(pxStr), parseFloat(qtyStr));
+    }
+    for (const [pxStr, qtyStr] of data.a) {
+      updateBook('ask', parseFloat(pxStr), parseFloat(qtyStr));
+    }
+    // Refresh best bid/ask from sorted book
+    if (S.book.bids.length > 0 && S.book.asks.length > 0) {
+      S.bid = S.book.bids[0].px; S.bidQty = S.book.bids[0].qty;
+      S.ask = S.book.asks[0].px; S.askQty = S.book.asks[0].qty;
+      processTick(ns, S.bid, S.bidQty, S.ask, S.askQty);
+      updatePhantomTrades(performance.now());
+    }
+  }
+
+  // ── L2 partial depth: { lastUpdateId, bids:[[px,qty],...], asks:[[px,qty],...] } ──
+  if (data.lastUpdateId && data.bids && data.asks) {
+    // Full snapshot — replace book
+    S.book.bids = data.bids.map(([p, q]) => ({ px: parseFloat(p), qty: parseFloat(q) }));
+    S.book.asks = data.asks.map(([p, q]) => ({ px: parseFloat(p), qty: parseFloat(q) }));
+    S.book.bids.sort((a, b) => b.px - a.px);
+    S.book.asks.sort((a, b) => a.px - b.px);
+    if (S.book.bids.length > 0 && S.book.asks.length > 0) {
+      S.bid = S.book.bids[0].px; S.bidQty = S.book.bids[0].qty;
+      S.ask = S.book.asks[0].px; S.askQty = S.book.asks[0].qty;
+      processTick(ns, S.bid, S.bidQty, S.ask, S.askQty);
+      updatePhantomTrades(performance.now());
+    }
+  }
+
+  // ── Response to subscription ──
+  if (data.result !== undefined || data.id) {
+    // subscription ack
+  }
+
+  // ── Legacy v2 format: { type: "l2_updates", changes: [...] } ──
+  if (data.type === 'l2_updates' && data.changes) {
+    for (const [side, pxStr, qtyStr] of data.changes) {
+      updateBook(side === 'buy' ? 'bid' : 'ask', parseFloat(pxStr), parseFloat(qtyStr));
+    }
+    if (S.book.bids.length > 0 && S.book.asks.length > 0) {
+      S.bid = S.book.bids[0].px; S.bidQty = S.book.bids[0].qty;
+      S.ask = S.book.asks[0].px; S.askQty = S.book.asks[0].qty;
+      processTick(ns, S.bid, S.bidQty, S.ask, S.askQty);
+      updatePhantomTrades(performance.now());
+    }
+  }
+
+  // FPS counter
+  S.fpsAccum++;
+  if (Date.now() - S.fpsTs > 1000) {
+    S.fps = S.fpsAccum;
+    S.fpsAccum = 0;
+    S.fpsTs = Date.now();
+  }
+}
+
+function updateBook(side, px, qty) {
+  const book = side === 'bid' ? S.book.bids : S.book.asks;
+  const idx = book.findIndex(l => l.px === px);
+  if (qty === 0) {
+    if (idx >= 0) book.splice(idx, 1);
+  } else {
+    if (idx >= 0) { book[idx].qty = qty; }
+    else { book.push({ px, qty }); }
+  }
+  // Sort
+  if (side === 'bid') book.sort((a, b) => b.px - a.px); // descending
+  else book.sort((a, b) => a.px - b.px); // ascending
+  // Trim
+  if (book.length > 50) book.length = 50;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// MAIN LOOP
+// ══════════════════════════════════════════════════════════════════════
+let lastRender = 0;
+function mainLoop() {
+  const now = performance.now();
+  if (now - lastRender > 200) { // 5 fps render
+    renderUI();
+    checkAchievements();
+    lastRender = now;
+  }
+  requestAnimationFrame(mainLoop);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════════════════════
+sparkQuotes = new QuoteSpark('spark-quotes');
+renderAchievements();
+renderImprovements();
+connect();
+mainLoop();
+
+// XP per second (idle game passive income)
+setInterval(() => {
+  if (wsReady && S.samples > 0) addXP(1);
+}, 5000);
+</script>
+</body>
+</html>

@@ -55,6 +55,11 @@ public struct EngineView
     public double Micro, Mid, Sigma2, OfiNorm, CashUsd, AvgSize;
     public Slot BidSlot, AskSlot;
     public bool Breaker, Quoting, IsHealthy, Warm, Killed, KillSent, FlushPending, FlushOk, LastFillSell;
+
+    // ── Improvement #10: Extended signal view ──
+    public double Momentum, ZScore, SpreadRatio, OfiAccel;
+    public int VolRegime; // 0=Low,1=Med,2=High,3=Extreme
+    public double SpreadQuality;
 }
 
 public sealed class Engine
@@ -164,7 +169,14 @@ public sealed class Engine
             Killed = Kill,
             KillSent = _killSent,
             FlushPending = _flushReq != 0,
-            FlushOk = _flushOk
+            FlushOk = _flushOk,
+            // ── Improvement #10: Extended signals ──
+            Momentum = _s.Momentum,
+            ZScore = _s.ZScore,
+            SpreadRatio = _s.SpreadRatio,
+            OfiAccel = _s.OfiAccel,
+            VolRegime = (int)_s.Regime,
+            SpreadQuality = _s.SpreadQuality
         };
         long s = _ver;
         Volatile.Write(ref _ver, s + 1);
@@ -422,7 +434,9 @@ public sealed class Engine
         }
 
         double lagSec = _lagExcess * 1e-9 + _c.RttSec;
-        Quoter.Compute(in _c.Q, _s.Micro, drift, _s.Sigma2, Pos8 * 1e-8, lagSec, _bestBid8, _bestAsk8, out long bid8, out long ask8);
+        // ── Improvements #6-#9: Pass extended signals to quoter ──
+        Quoter.Compute(in _c.Q, _s.Micro, drift, _s.Sigma2, Pos8 * 1e-8, lagSec, _bestBid8, _bestAsk8, out long bid8, out long ask8,
+            spreadRatio: _s.SpreadRatio, zScore: _s.ZScore, momentum: _s.Momentum, volRegime: (int)_s.Regime);
 
         _intBid8 = bid8;
         _intAsk8 = ask8;
