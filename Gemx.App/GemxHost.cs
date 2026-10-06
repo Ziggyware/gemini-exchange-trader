@@ -14,7 +14,12 @@ public sealed class GemxHost
     public readonly int PriceDecimals, QtyDecimals;
     public readonly FeedSocket Md, Orders;
     public readonly Executor Exec;
+    public readonly bool Paper;
+    public readonly PaperExchange? PaperExec;
     public volatile bool AuthRejected;
+
+    public long ExecSent => PaperExec != null ? PaperExec.Sent : Exec.Sent;
+    public long ExecDropped => PaperExec != null ? PaperExec.Dropped : Exec.Dropped;
 
     readonly FrameRing _mdRing = new(1 << 24), _odRing = new(1 << 20);
     readonly SpscRing<Cmd> _cmds = new(1 << 12);
@@ -24,13 +29,19 @@ public sealed class GemxHost
     readonly Thread _engineThread, _execThread;
     readonly Thread? _tapThread;
     readonly Task _mdTask, _orderTask;
+    Thread? _paperThread;
 
     public static async Task<GemxHost> StartAsync(AppSettings s)
     {
+        s.ValidateSession();
         var ep = s.Endpoints();
-        string key = (Environment.GetEnvironmentVariable("GEMX_API_KEY", EnvironmentVariableTarget.User) ?? "").Trim();
-        string secret = (Environment.GetEnvironmentVariable("GEMX_API_SECRET", EnvironmentVariableTarget.User) ?? "").Trim();
-        if (key.Length == 0 || secret.Length == 0) throw new InvalidOperationException("GEMX_API_KEY and GEMX_API_SECRET must be set in the environment of this process; restart the app after setting them");
+        string key = "", secret = "";
+        if (!s.PaperTrading)
+        {
+            key = (Environment.GetEnvironmentVariable("GEMX_API_KEY", EnvironmentVariableTarget.User) ?? "").Trim();
+            secret = (Environment.GetEnvironmentVariable("GEMX_API_SECRET", EnvironmentVariableTarget.User) ?? "").Trim();
+            if (key.Length == 0 || secret.Length == 0) throw new InvalidOperationException("GEMX_API_KEY and GEMX_API_SECRET must be set in the environment of this process; restart the app after setting them (or switch on PaperTrading to trade without keys)");
+        }
         SymbolSpec spec;
         using (var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) })
         using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
@@ -51,6 +62,7 @@ public sealed class GemxHost
     GemxHost(AppSettings s, (Uri Md, string[] MdSubs, Uri Orders, string[] OrderSubs) ep, SymbolSpec spec, EngineConfig cfg, string key, byte[] secret)
     {
         Spec = spec;
+        Paper = s.PaperTrading;
         PriceDecimals = Decimals(spec.PriceTick8);
         QtyDecimals = Decimals(spec.QtyStep8);
         _ordersCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
@@ -61,7 +73,14 @@ public sealed class GemxHost
             _tapWriter = new TapWriter(_tap, s.TapPath());
         }
         string symbol = s.Symbol.Trim();
-        Engine = new Engine(cfg, new FrameParser(new SymbolTable(symbol), s.BaseAsset.Trim()), _cmds, _tap);
+        string baseAsset = s.BaseAsset.Trim();
+        string quoteAsset = s.ResolveQuoteAsset();
+        Engine = new Engine(cfg, new FrameParser(new SymbolTable(symbol), baseAsset, quoteAsset), _cmds, _tap);
+        if (Paper)
+        {
+            PaperExec = new PaperExchange(_cmds, _odRing, Engine, symbol, baseAsset, quoteAsset,
+                (long)Math.Round(s.PaperBaseQty * 1e8), (long)Math.Round(s.PaperCashUsd * 1e8)) { Log = m => Log(m) };
+        }
         Md = new FeedSocket(ep.Md, ep.MdSubs, _mdRing, MdSubId, null, () => Engine.ResyncMd) { Log = m => Log("md: " + m) };
         Orders = new FeedSocket(ep.Orders, ep.OrderSubs, _odRing, OrderSubId, o => GeminiAuth.Apply(o, key, secret)) { Log = OnOrdersLog };
         Exec = new Executor(_cmds, Orders, symbol, s.TimeInForce.Trim()) { Log = m => Log("exec: " + m) };
@@ -72,11 +91,17 @@ public sealed class GemxHost
         if (_tapWriter != null) _tapThread = new Thread(() => _tapWriter.Run(_tapCts.Token)) { Name = "gemx-tap", IsBackground = true };
 
         _tapThread?.Start();
-        _execThread.Start();
+        if (!Paper) _execThread.Start();
         _engineThread.Start();
         _mdTask = Task.Run(() => Md.RunAsync(ct));
-        _orderTask = Task.Run(() => Orders.RunAsync(_ordersCts.Token));
-        Log($"started {symbol} priceTick8={spec.PriceTick8} qtyStep8={spec.QtyStep8} minQty8={spec.MinQty8} epoch={cfg.Epoch} orders={ep.Orders}");
+        if (Paper)
+        {
+            _paperThread = new Thread(() => PaperExec!.Run(ct)) { Name = "gemx-paper", IsBackground = true };
+            _paperThread.Start();
+            _orderTask = Task.CompletedTask;   // no keys, no order socket: the local exchange answers
+        }
+        else _orderTask = Task.Run(() => Orders.RunAsync(_ordersCts.Token));
+        Log($"started {symbol} priceTick8={spec.PriceTick8} qtyStep8={spec.QtyStep8} minQty8={spec.MinQty8} epoch={cfg.Epoch} orders={(Paper ? "paper (local simulation)" : ep.Orders.ToString())}");
     }
 
 
@@ -130,7 +155,7 @@ public sealed class GemxHost
 
     public async Task StopAsync()
     {
-        bool nothingOnExchange = Exec.Sent == 0 && Orders.Current == null;
+        bool nothingOnExchange = !Paper && ExecSent == 0 && Orders.Current == null;
         Engine.Kill = true;
         bool flushed = false;
         if (!nothingOnExchange)
@@ -142,12 +167,18 @@ public sealed class GemxHost
                 await Task.Delay(20);
             }
         }
-        if (flushed) Log("stop: session cancel acknowledged");
+        if (flushed) Log(Paper ? "stop: paper session flushed — nothing was ever on the exchange" : "stop: session cancel acknowledged");
         else if (nothingOnExchange) Log("stop: no command was ever sent and the order socket is down; this session has no orders on the exchange");
+        else if (Paper) Log("stop: paper flush not confirmed (local exchange did not answer)");
         else Log("stop: session cancel NOT confirmed, verify open orders on the exchange");
         _cts.Cancel();
         await Task.WhenAny(Task.WhenAll(_mdTask, _orderTask), Task.Delay(3000));
-        await Task.Run(() => { _execThread.Join(2000); _engineThread.Join(2000); });
+        await Task.Run(() =>
+        {
+            if (_paperThread != null && _paperThread.IsAlive) _paperThread.Join(2000);
+            if (_execThread.IsAlive) _execThread.Join(2000);
+            _engineThread.Join(2000);
+        });
         if (_tapThread != null)
         {
             _tapCts.Cancel();

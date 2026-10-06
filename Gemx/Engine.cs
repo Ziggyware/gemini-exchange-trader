@@ -19,6 +19,8 @@ public sealed class EngineConfig
     public long RequoteTicks = 2;
     public long MaxQuoteAgeNs = 5_000_000_000, StaleNs = 500_000_000, MaxLagNs = 100_000_000;
     public long PendingTimeoutNs = 2_000_000_000, BreakerCooldownNs = 10_000_000_000, CoolNs = 5_000_000;
+    // how long a side stays blocked after the exchange reports insufficient funds before retrying
+    public long FundsRetryNs = 10_000_000_000;
     public int WarmupSamples = 50, MaxConsecFaults = 3, MaxRejects = 5, ImbalanceLevels = 3;
     public double RttSec = 0.010, ImbalanceWeight = 0;
     public ulong Epoch = 1;
@@ -37,6 +39,12 @@ public struct EngineView
 {
     // BlockFlags: bit0 = bid blocked by risk limits, bit1 = ask blocked
     public byte BlockFlags;
+    // FundsFlags: bit0 = bid blocked by insufficient funds, bit1 = ask blocked
+    public byte FundsFlags;
+    // quote-currency balance from the last balance update (0 when never seen)
+    public long QuoteAvail8;
+    public bool QuoteKnown;
+    public long FundsRejects;
     public long IntendedBid8, IntendedAsk8;
     public long Base8, RecvNs, BestBid8, BestAsk8, BidQuote8, AskQuote8, Pos8, LagNs, MaxLagSeenNs;
     public long BestBidQty8, BestAskQty8;
@@ -67,7 +75,10 @@ public sealed class Engine
     bool _haveTick, _breaker, _posKnown, _baseSet, _killSent, _flushOk, _lastFillSell;
     long _breakerUntil, _lastTickNs, _lagExcess, _bestBid8, _bestAsk8, _bestBidQty8, _bestAskQty8, _base8, _lastFillNs, _flushReq, _req;
     long _killReq, _killRetryNs, _intBid8, _intAsk8, _lastFillPx8;
+    long _quote8, _fundsRetryNs, _fundsRejects;
+    bool _quoteKnown;
     byte _blk;
+    byte _fundsBlk, _fundsView;
     int _faults, _rejects;
     ulong _seq;
     long _ver;
@@ -116,6 +127,10 @@ public sealed class Engine
             IntendedBid8 = _intBid8,
             IntendedAsk8 = _intAsk8,
             BlockFlags = _blk,
+            FundsFlags = _fundsView,
+            QuoteAvail8 = _quote8,
+            QuoteKnown = _quoteKnown,
+            FundsRejects = _fundsRejects,
             BidQuote8 = _bid.S == Slot.Idle ? 0 : _bid.Px,
             AskQuote8 = _ask.S == Slot.Idle ? 0 : _ask.Px,
             BidSentNs = _bid.S == Slot.Idle ? 0 : _bid.SentNs,
@@ -264,6 +279,13 @@ public sealed class Engine
             }
             return;
         }
+        if (m.HasQuote)
+        {
+            // the exchange just told us what we can spend: trust it over any earlier reject
+            _quote8 = m.QuoteAvail;
+            _quoteKnown = true;
+            _fundsBlk = 0;
+        }
         if (!_baseSet) { _base8 = m.BalTotal; _baseSet = true; }
         long want = m.BalTotal - _base8;
         if (!_posKnown) { Pos8 = want; _posKnown = true; return; }
@@ -310,8 +332,14 @@ public sealed class Engine
                 }
                 break;
             case Status.Rejected:
-                if (mine) l = default;
-                if (++_rejects >= _c.MaxRejects) Trip(ns);
+                if (mine)
+                {
+                    bool neverLive = l.S == Slot.PlacePending;
+                    l = default;
+                    if (neverLive) l.CoolUntil = ns + _c.CoolNs;
+                    if (m.NoFunds) NoteFundsReject(sell, ns);
+                    else if (++_rejects >= _c.MaxRejects) Trip(ns);
+                }
                 break;
         }
     }
@@ -350,8 +378,11 @@ public sealed class Engine
         }
         if (l.S == Slot.PlacePending)
         {
+            bool wasBid = _bid.ReqId == m.ReqId;
             l = default;
-            if (++_rejects >= _c.MaxRejects) Trip(ns);
+            l.CoolUntil = ns + _c.CoolNs;
+            if (m.NoFunds) NoteFundsReject(!wasBid, ns);
+            else if (++_rejects >= _c.MaxRejects) Trip(ns);
         }
         else Trip(ns);
     }
@@ -366,6 +397,7 @@ public sealed class Engine
             KillFlush(ns);
             return;
         }
+        if (_fundsBlk != 0 && ns >= _fundsRetryNs) _fundsBlk = 0;   // retry after the backoff
         if (_breaker)
         {
             if (ns < _breakerUntil || !Healthy()) return;
@@ -394,19 +426,44 @@ public sealed class Engine
 
         _intBid8 = bid8;
         _intAsk8 = ask8;
-        _blk = (byte)((bid8 > 0 && !Allowed(false, bid8) ? 1 : 0) | (ask8 > 0 && !Allowed(true, ask8) ? 2 : 0));
+        byte blk = 0, funds = 0;
+        if (bid8 > 0 && !Allowed(false, bid8)) { blk |= 1; if (!FundsOk(false, bid8)) funds |= 1; }
+        if (ask8 > 0 && !Allowed(true, ask8)) { blk |= 2; if (!FundsOk(true, ask8)) funds |= 2; }
+        _blk = blk;
+        _fundsView = funds;
 
         Drive(ref _bid, false, bid8, ns);
         Drive(ref _ask, true, ask8, ns);
     }
 
-    bool Allowed(bool sell, long px8)
+    bool Allowed(bool sell, long px8) => RiskOk(sell, px8) && FundsOk(sell, px8);
+
+    // risk limits: per-order notional cap and the position band
+    bool RiskOk(bool sell, long px8)
     {
         long qty = _c.QuoteQty8;
         if ((double)px8 * qty * 1e-16 > _c.MaxNotionalUsd) return false;
         if (!sell) return Pos8 + qty <= _c.MaxPos8;
         long floor = Math.Max(-_c.MaxPos8, -_base8);
         return Pos8 - qty >= floor;
+    }
+
+    // funds: the side was rejected for balance reasons, or the quote balance cannot cover the buy
+    bool FundsOk(bool sell, long px8)
+    {
+        if ((_fundsBlk & (sell ? (byte)2 : (byte)1)) != 0) return false;
+        if (sell || !_quoteKnown) return true;
+        double notionalUsd = px8 * 1e-8 * _c.QuoteQty8 * 1e-8;
+        return notionalUsd <= _quote8 * 1e-8;
+    }
+
+    // The exchange said the balance was too small. Block the side, skip the reject counter that
+    // would otherwise trip the breaker, and wait for a balance update or the retry backoff.
+    void NoteFundsReject(bool sell, long ns)
+    {
+        _fundsRejects++;
+        _fundsBlk |= sell ? (byte)2 : (byte)1;
+        _fundsRetryNs = ns + _c.FundsRetryNs;
     }
 
     void Drive(ref Leg l, bool sell, long target8, long ns)

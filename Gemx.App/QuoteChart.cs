@@ -58,6 +58,7 @@ internal sealed class QuoteChart : UiControl
         ResizeRedraw = true;
         Surface = Pal.Card;
         MinimumSize = new Size(280, 170);
+        TabStop = true;
     }
 
     public void Reset(int priceDecimals)
@@ -110,7 +111,9 @@ internal sealed class QuoteChart : UiControl
     int Window => Math.Min(Math.Max(60, _visible), Cap);
 
     // ---------------------------------------------------------------- interaction
-    protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); _over = true; }
+    // take keyboard/wheel focus on hover: the candles pane above also listens for the wheel, and
+    // WinForms routes it to the focused control
+    protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); _over = true; Focus(); }
 
     protected override void OnMouseLeave(EventArgs e)
     {
@@ -489,6 +492,11 @@ internal sealed class QuoteChart : UiControl
 
         float x = _plot.Left + S(2);
         float y = S(2);
+
+        // pane identity: the stacked layout shows this chart permanently, so it names itself
+        Gfx.Tracked(g, "QUOTE FLOW", Fonts.UiTinyBold, Pal.TextHi, x, y + S(2.5f), 0.9f);
+        x += Gfx.TrackedWidth(g, "QUOTE FLOW", Fonts.UiTinyBold, 0.9f) + S(12);
+
         (string Name, Color Ink, bool Dash)[] legend =
         {
             ("best bid", Pal.Up, false),
@@ -544,7 +552,7 @@ internal sealed class QuoteChart : UiControl
                 if (!hit) break;
             }
             if (r.Bottom > _plot.Bottom + S(10)) r.Y = _plot.Bottom + S(10) - r.Height;
-            if (r.Top < _plot.Top - S(8)) r.Top = _plot.Top - S(8);
+            if (r.Top < _plot.Top - S(8)) r = new RectangleF(r.X, _plot.Top - S(8), r.Width, r.Height);
             placed.Add(r);
 
             Gfx.FillRound(g, r, S(3), Pal.Mix(ink, Color.Black, 0.58));

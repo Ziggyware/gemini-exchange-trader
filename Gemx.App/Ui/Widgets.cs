@@ -165,9 +165,20 @@ internal sealed class StateChip : UiControl
     {
         bool changed = text != _text || tone != _tone;
         _text = text; _detail = detail; _tone = tone; _pulse = pulse;
-        int w = TextRenderer.MeasureText(_text, Fonts.UiBold).Width + TextRenderer.MeasureText(_detail, Fonts.MonoTiny).Width + (int)S(62);
-        Width = Math.Max((int)S(120), w);
+        Width = MeasureW();
         if (changed) _shown = 0f;
+    }
+
+    float Track => S(0.9f);
+
+    // measured exactly the way OnPaint draws it (tracked headline + mono detail) so the two
+    // never run into each other at any DPI
+    int MeasureW()
+    {
+        var g = Gfx.MeasureGraphics(DeviceDpi);
+        float w = S(27) + Gfx.TrackedWidth(g, _text, Fonts.UiBold, Track) + S(8);
+        if (_detail.Length > 0) w += Gfx.Width(g, _detail, Fonts.MonoTiny) + S(16);
+        return (int)Math.Ceiling(Math.Max(S(120), w));
     }
 
     protected override bool Animate(float dt)
@@ -200,8 +211,8 @@ internal sealed class StateChip : UiControl
 
         float x = S(27);
         Color ink = Pal.Mix(c, Pal.TextHi, 0.35f + 0.25f * (1f - _shown));
-        Gfx.Tracked(g, _text, Fonts.UiBold, ink, x, cy - S(7.5f), 0.9f);
-        x += Gfx.TrackedWidth(g, _text, Fonts.UiBold, 0.9f) + S(8);
+        Gfx.Tracked(g, _text, Fonts.UiBold, ink, x, cy - S(7.5f), Track);
+        x += Gfx.TrackedWidth(g, _text, Fonts.UiBold, Track) + S(8);
         if (_detail.Length > 0 && x < Width - S(20))
             g.DrawString(_detail, Fonts.MonoTiny, Cache.Brush(Pal.TextDim), x, cy - S(6f), Gfx.SfTop);
     }
@@ -226,15 +237,28 @@ internal sealed class StatusPill : UiControl
         Width = 74;
     }
 
+    // Letter tracking in device pixels — must be the same value in Set and OnPaint or the
+    // measured width will not match what is drawn.
+    float Track => S(0.8f);
+
     public void Set(StateTone tone, string? value = null, bool pulse = false)
     {
         _tone = tone;
         _value = value ?? "";
         _pulse = pulse;
-        int w = TextRenderer.MeasureText(Label, Fonts.UiTinyBold).Width + (int)S(26);
-        if (_value.Length > 0) w += TextRenderer.MeasureText(_value, Fonts.MonoTiny).Width + (int)S(6);
-        Width = Math.Max((int)S(46), w);
+        Width = MeasureW();
         Invalidate();
+    }
+
+    // Width the pill needs: dot gutter + tracked label + gap + value + right padding. Measured
+    // with GDI+ at this control's DPI — the same font, tracking and scale OnPaint draws with, so
+    // label and value can never collide regardless of font size or monitor DPI.
+    int MeasureW()
+    {
+        var g = Gfx.MeasureGraphics(DeviceDpi);
+        float w = S(17) + Gfx.TrackedWidth(g, Label, Fonts.Pill, Track) + S(7);
+        if (_value.Length > 0) w += Gfx.Width(g, _value, Fonts.PillValue) + S(8);
+        return (int)Math.Ceiling(Math.Max(S(52), w + S(3)));
     }
 
     protected override bool Animate(float dt)
@@ -259,12 +283,12 @@ internal sealed class StatusPill : UiControl
         float cy = Height / 2f;
         float rad = S(3.1f) * (_tone == StateTone.Warm ? 0.85f + 0.15f * (float)Math.Sin(_phase * 3.1f) : 1f);
         Gfx.Dot(g, S(10), cy, rad, c, _pulse);
-        Gfx.Tracked(g, Label, Fonts.UiTinyBold, Pal.Mix(c, Pal.TextHi, _tone == StateTone.Idle ? 0.0 : 0.25), S(17), cy - S(6f), 0.8f);
+        Gfx.Tracked(g, Label, Fonts.Pill, Pal.Mix(c, Pal.TextHi, _tone == StateTone.Idle ? 0.0 : 0.25), S(17), cy - S(6.4f), Track);
 
         if (_value.Length > 0)
         {
-            float vx = Width - S(8) - Gfx.Width(g, _value, Fonts.MonoTiny);
-            g.DrawString(_value, Fonts.MonoTiny, Cache.Brush(Pal.Text), vx, cy - S(5.5f), Gfx.SfTop);
+            float vx = Width - S(8) - Gfx.Width(g, _value, Fonts.PillValue);
+            g.DrawString(_value, Fonts.PillValue, Cache.Brush(Pal.Text), vx, cy - S(5.9f), Gfx.SfTop);
         }
     }
 }
@@ -307,13 +331,14 @@ internal sealed class ToolButton : UiControl
     {
         float h = S(Compact ? 20 : 26);
         float content = 0;
-        if (_text.Length > 0) content += TextRenderer.MeasureText(_text, Fonts.UiBold).Width;
+        // measure with the same GDI+ call OnPaint uses so the label can never be clipped
+        if (_text.Length > 0) content += Gfx.Width(Gfx.MeasureGraphics(DeviceDpi), _text, Fonts.UiBold);
         if (_glyph != Glyph.None)
         {
             content += S(14);
             if (_text.Length > 0) content += S(6);
         }
-        return (int)Math.Max(h, content + S(22));
+        return (int)Math.Ceiling(Math.Max(h, content + S(22)));
     }
 
     protected override void OnHandleCreated(EventArgs e)
@@ -669,10 +694,13 @@ internal sealed class MetricTile : UiControl
             Gfx.Tracked(g, Unit.ToUpperInvariant(), Fonts.UiTiny, Pal.TextFaint, x + Gfx.TrackedWidth(g, Heading.ToUpperInvariant(), Fonts.UiTinyBold, 0.9f) + S(7), uw > 0 ? S(8.6f) : S(8f), 0.8f);
         }
 
-        // value, monospaced so digits never jitter
-        g.DrawString(_value, Fonts.MonoBig, Cache.Brush(_valueInk), x - S(1), S(20), Gfx.SfTop);
-
         float sparkW = Math.Min(S(SparkCap / 2.2f), Width * 0.42f);
+
+        // value, monospaced so digits never jitter; the box stops before the sparkline so a long
+        // value ellipsises instead of running under it
+        var valBox = new RectangleF(x - S(1), S(20), Math.Max(S(40), Width - sparkW - S(22) - x), Fonts.MonoBig.GetHeight(g));
+        g.DrawString(_value, Fonts.MonoBig, Cache.Brush(_valueInk), valBox, Gfx.Sf);
+
         var sr = new RectangleF(Width - sparkW - S(10), Height - S(26), sparkW, S(18));
         _spark.Draw(g, sr, Pal.Alpha(_valueInk, 220), true);
 
@@ -923,12 +951,14 @@ internal sealed class InventoryGauge : UiControl
         }
         Gfx.HairV(g, mid, trackY - S(3), trackY + trackH + S(3), Pal.Alpha(Pal.LineBright, 220));
 
-        // value flag
-        float fx = Math.Max(pad + S(20), Math.Min(track.Right - S(20), vx));
-        var flag = new RectangleF(fx - S(24), trackY + trackH + S(3), S(48), S(14));
+        // value flag — sized to its text so the reading is never clipped, kept inside the track
+        string pv = (_pos8 / 1e8).ToString("F6", Fmt.Inv);
+        float fw = Math.Max(S(48), Gfx.Width(g, pv, Fonts.MonoTiny) + S(16));
+        float fx = Math.Max(pad + fw / 2, Math.Min(track.Right - fw / 2, vx));
+        var flag = new RectangleF(fx - fw / 2, trackY + trackH + S(3), fw, S(14));
         Gfx.FillRound(g, flag, S(4), Pal.Mix(ink, Color.Black, 0.55));
         Gfx.StrokeRound(g, flag, S(4), Pal.Alpha(ink, 170));
-        g.DrawString((_pos8 / 1e8).ToString("F6", Fmt.Inv), Fonts.MonoTiny, Cache.Brush(Pal.Mix(ink, Color.White, 0.5)), flag, Gfx.SfCenter);
+        g.DrawString(pv, Fonts.MonoTiny, Cache.Brush(Pal.Mix(ink, Color.White, 0.5)), flag, Gfx.SfCenter);
         using (var tri = new GraphicsPath())
         {
             tri.AddPolygon(new[]
@@ -966,6 +996,7 @@ internal sealed class QuoteRow : UiControl
     int _dec = 2;
     Slot _slot;
     bool _blocked;
+    bool _funds;
     bool _over;
     float _hover, _phase;
 
@@ -976,10 +1007,10 @@ internal sealed class QuoteRow : UiControl
         Height = 34;
     }
 
-    public void Set(long px8, long intended8, long touch8, long tick8, int dec, Slot slot, long sentNs, long nowNs, bool blocked)
+    public void Set(long px8, long intended8, long touch8, long tick8, int dec, Slot slot, long sentNs, long nowNs, bool blocked, bool fundsBlocked = false)
     {
         _px8 = px8; _intended8 = intended8; _touch8 = touch8; _tick8 = Math.Max(1, tick8); _dec = dec;
-        _slot = slot; _nowNs = nowNs; _blocked = blocked;
+        _slot = slot; _nowNs = nowNs; _blocked = blocked; _funds = fundsBlocked;
         _ageNs = sentNs == 0 || nowNs <= sentNs ? 0 : nowNs - sentNs;
         Invalidate();
     }
@@ -1016,11 +1047,17 @@ internal sealed class QuoteRow : UiControl
 
         float x = chip.Right + S(9);
         bool live = _px8 > 0;
-        Color priceInk = !live ? Pal.TextFaint : _blocked ? Pal.Warn : Pal.TextHi;
+        // amber = held back by risk limits, red = held back by the balance
+        Color priceInk = !live ? Pal.TextFaint : _blocked ? (_funds ? Pal.DownLit : Pal.Warn) : Pal.TextHi;
         string px = live ? Fmt.Price(_px8, _dec) : "-";
         g.DrawString(px, Fonts.MonoMid, Cache.Brush(priceInk), x, (Height - S(18)) / 2f - S(1), Gfx.SfTop);
         float pxw = Gfx.Width(g, px, Fonts.MonoMid);
-        if (!live && _intended8 > 0)
+        if (_blocked && _funds)
+        {
+            string nf = live ? "no funds" : "no funds · want " + Fmt.Price(_intended8, _dec);
+            g.DrawString(nf, Fonts.MonoTiny, Cache.Brush(Pal.DownLit), x + pxw + S(7), (Height - S(9)) / 2f, Gfx.SfTop);
+        }
+        else if (!live && _intended8 > 0)
         {
             string w = "want " + Fmt.Price(_intended8, _dec);
             g.DrawString(w, Fonts.MonoTiny, Cache.Brush(Pal.TextFaint), x + pxw + S(7), (Height - S(9)) / 2f, Gfx.SfTop);

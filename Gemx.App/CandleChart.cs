@@ -198,7 +198,7 @@ internal sealed class CandleStrip : UiControl
             case Keys.Right: _offset = Math.Clamp(_offset - 5, 0, Math.Max(0, Total - _visible)); break;
             case Keys.Home: _offset = Math.Max(0, Total - _visible); break;
             case Keys.End: _offset = 0; break;
-            case Keys.OemPlus: case Keys.Add: _visible = Math.Clamp(_visible - 10, 12, 300); break;
+            case Keys.Oemplus: case Keys.Add: _visible = Math.Clamp(_visible - 10, 12, 300); break;
             case Keys.OemMinus: case Keys.Subtract: _visible = Math.Clamp(_visible + 10, 12, 300); break;
             case Keys.L: _log = !_log; break;
             default: return;

@@ -37,6 +37,18 @@ public sealed class AppSettings
     [Category("Market"), Description("timeInForce value sent on order.place.")]
     public string TimeInForce { get; set; } = "MOC";
 
+    [Category("Market"), Description("Quote asset code matched against balance updates for the funds check. Leave empty to derive it from Symbol by stripping BaseAsset (BTCUSD - BTC = USD).")]
+    public string QuoteAsset { get; set; } = "";
+
+    [Category("Session"), Description("Paper trading: quote against the live feed but fill locally. No orders leave this machine and no API keys are required.")]
+    public bool PaperTrading { get; set; } = false;
+
+    [Category("Session"), Description("Paper starting cash in quote currency. Buys are blocked once it is spent, exactly like a real balance.")]
+    public double PaperCashUsd { get; set; } = 10000;
+
+    [Category("Session"), Description("Paper starting base-asset holdings, in base units.")]
+    public double PaperBaseQty { get; set; } = 0;
+
     [Category("Quoting"), Description("Risk aversion gamma (> 0).")]
     public double Gamma { get; set; } = 0.1;
 
@@ -104,6 +116,25 @@ public sealed class AppSettings
     }
 
     public string TapPath() => Path.Combine(TapDirectory, $"tap-{DateTime.Now:yyyyMMdd-HHmmss}.bin");
+
+    /// Quote asset used for the funds check: explicit setting, else Symbol minus BaseAsset.
+    public string ResolveQuoteAsset()
+    {
+        if (!string.IsNullOrWhiteSpace(QuoteAsset)) return QuoteAsset.Trim().ToUpperInvariant();
+        string sym = Symbol.Trim().ToUpperInvariant(), b = BaseAsset.Trim().ToUpperInvariant();
+        if (b.Length == 0 || sym.Length <= b.Length) return "";
+        if (sym.StartsWith(b, StringComparison.Ordinal)) return sym[b.Length..];
+        if (sym.EndsWith(b, StringComparison.Ordinal)) return sym[..^b.Length];
+        return "";
+    }
+
+    public void ValidateSession()
+    {
+        if (PaperTrading && PaperCashUsd <= 0)
+            throw new FormatException("PaperCashUsd must be > 0 when PaperTrading is on");
+        if (PaperTrading && PaperBaseQty < 0)
+            throw new FormatException("PaperBaseQty must be >= 0");
+    }
 
     static readonly char[] Sep = { ',', ';', '\n' };
 

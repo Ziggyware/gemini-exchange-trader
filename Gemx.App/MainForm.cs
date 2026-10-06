@@ -24,6 +24,7 @@ public sealed class MainForm : Form
     string _stateText = "";
     double _lastPnl;
     bool _pnlKnown;
+    bool _fundsShown;
 
     // ------------------------------------------------------------------ chrome
     readonly LogoMark _logo = new();
@@ -43,7 +44,8 @@ public sealed class MainForm : Form
     readonly ToolButton _btnSetReset = new("Defaults", Glyph.Broom, ToolButton.Kind.Ghost);
     readonly ToolButton _btnSetClose = new("Close", Glyph.Close, ToolButton.Kind.Ghost);
 
-    readonly Segments _tabs = new("Flow", "1m", "5m", "15m", "30m", "1h", "1d", "1w", "1M");
+    // the flow chart is permanently visible below the candles, so the tabs only pick the candle timeframe
+    readonly Segments _tabs = new("1m", "5m", "15m", "30m", "1h", "1d", "1w", "1M");
     readonly QuoteChart _flow = new();
     readonly CandleSet _candles = new();
     readonly DepthLadder _ladder = new();
@@ -61,13 +63,13 @@ public sealed class MainForm : Form
     readonly MeterBar _mLag = new("Feed lag excess");
     readonly MeterBar _mWarm = new("Warm-up");
 
-    readonly StatGrid _statPos = new(2, 1);
+    readonly StatGrid _statPos = new(2, 2);
     readonly StatGrid _statPerf = new(3, 1);
     readonly StatGrid _statQuote = new(3, 2);
     readonly StatGrid _statDiag = new(2, 5);
 
     readonly CardStack _rail = new();
-    readonly Card _cardPos = new("Position", "gauge", Pal.Up, 182);
+    readonly Card _cardPos = new("Position", "gauge", Pal.Up, 208);
     readonly Card _cardPerf = new("Performance", "target", Pal.Accent, 140);
     readonly Card _cardQuotes = new("Live quotes", "layers", Pal.Violet, 176);
     readonly Card _cardSignals = new("Signals", "wave", Pal.Warn, 186);
@@ -81,13 +83,14 @@ public sealed class MainForm : Form
     readonly StatusPill _pillKill = new("KILL");
     readonly StatusPill _pillMd = new("MD");
     readonly StatusPill _pillOrd = new("ORDERS");
+    readonly StatusPill _pillPaper = new("PAPER");
 
-    readonly Label _lblRight = new() { AutoSize = true, Font = Fonts.MonoSmall, ForeColor = Pal.TextDim, TextAlign = ContentAlignment.MiddleRight, Margin = new Padding(0, 4, 8, 0) };
+    readonly Label _lblRight = new() { AutoSize = false, Dock = DockStyle.Fill, Font = Fonts.MonoSmall, ForeColor = Pal.TextDim, TextAlign = ContentAlignment.MiddleRight, Margin = new Padding(0, 0, 8, 0) };
     readonly Label _lblChart = new() { AutoSize = true, Font = Fonts.MonoTiny, ForeColor = Pal.TextFaint, TextAlign = ContentAlignment.MiddleRight, Margin = new Padding(0, 7, 6, 0) };
     readonly Label _lblLog = new() { AutoSize = true, Font = Fonts.MonoTiny, ForeColor = Pal.TextFaint, TextAlign = ContentAlignment.MiddleRight, Margin = new Padding(0, 7, 8, 0) };
 
     readonly PropertyGrid _grid = new();
-    readonly Panel _drawer = new() { Dock = DockStyle.Fill, Visible = false };
+    readonly TableLayoutPanel _drawer = new() { Dock = DockStyle.Fill, Visible = false };
     readonly ToolTip _tip = new() { InitialDelay = 320, ReshowDelay = 110, AutoPopDelay = 14000 };
 
     readonly System.Windows.Forms.Timer _timer = new() { Interval = 100 };
@@ -159,6 +162,7 @@ public sealed class MainForm : Form
         _tip.SetToolTip(_tape, "Fills, orders and alerts. Click a row to copy it.");
         _tip.SetToolTip(_flow, "Wheel zooms the time window, drag pans, double-click resets.");
         _tip.SetToolTip(_btnSnapshot, "Copy a text snapshot of the live state to the clipboard.");
+        _tip.SetToolTip(_pillPaper, "Paper trading: quotes run against the live feed but fills are simulated locally. No orders leave this machine and no API keys are used.");
         _tip.SetToolTip(_btnLogScroll, "Keep the log pinned to the newest line.");
 
         SetUi(UiState.Idle);
@@ -178,6 +182,12 @@ public sealed class MainForm : Form
         _btnStop.Margin = new Padding(4, 0, 0, 0);
         _btnKill.Margin = new Padding(4, 0, 0, 0);
         _btnSettings.Margin = new Padding(4, 0, 0, 0);
+
+        // mode badge sits with the transport buttons so paper vs live can never be mistaken
+        _pillPaper.Surface = Pal.Bg;
+        _pillPaper.Margin = new Padding(0, 0, 10, 0);
+        _pillPaper.Visible = false;
+        _pillPaper.Set(StateTone.Info, "sim");
     }
 
     TableLayoutPanel BuildRoot()
@@ -185,7 +195,7 @@ public sealed class MainForm : Form
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = Pal.Bg };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
 
@@ -198,7 +208,7 @@ public sealed class MainForm : Form
         title.Controls.Add(_logo, 0, 0);
         title.Controls.Add(_chip, 1, 0);
         var tools = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, BackColor = Pal.Bg, Anchor = AnchorStyles.Right };
-        tools.Controls.AddRange(new Control[] { _btnStart, _btnStop, _btnKill, _btnSettings });
+        tools.Controls.AddRange(new Control[] { _pillPaper, _btnStart, _btnStop, _btnKill, _btnSettings });
         title.Controls.Add(tools, 3, 0);
         root.Controls.Add(title, 0, 0);
 
@@ -226,16 +236,17 @@ public sealed class MainForm : Form
         content.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 348));
         content.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-        // ---- charts column
-        var charts = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, BackColor = Pal.Bg, Margin = new Padding(6, 6, 6, 6) };
+        // ---- charts column: candles on top, quote flow permanently below, log strip last
+        var charts = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = Pal.Bg, Margin = new Padding(6, 6, 6, 6) };
         charts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         charts.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
-        charts.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        charts.RowStyles.Add(new RowStyle(SizeType.Percent, 56));
+        charts.RowStyles.Add(new RowStyle(SizeType.Percent, 44));
         _logRow = new RowStyle(SizeType.Absolute, 166);
         charts.RowStyles.Add(_logRow);
 
         var tabRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 5, RowCount = 1, BackColor = Pal.Bg, Margin = new Padding(0) };
-        tabRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 372));
+        tabRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 336));
         tabRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         tabRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         tabRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -250,12 +261,16 @@ public sealed class MainForm : Form
         tabRow.Controls.Add(_lblChart, 4, 0);
         charts.Controls.Add(tabRow, 0, 0);
 
-        var host = new Panel { Dock = DockStyle.Fill, BackColor = Pal.Card, Margin = new Padding(0, 0, 0, 0), Padding = new Padding(0) };
-        _flow.Dock = DockStyle.Fill;
+        var candlePane = new Panel { Dock = DockStyle.Fill, BackColor = Pal.Card, Margin = new Padding(0, 0, 0, 4), Padding = new Padding(0) };
         _candles.Dock = DockStyle.Fill;
-        host.Controls.Add(_flow);
-        host.Controls.Add(_candles);
-        charts.Controls.Add(host, 0, 1);
+        candlePane.Controls.Add(_candles);
+        charts.Controls.Add(candlePane, 0, 1);
+
+        // the 4 px background gap above separates it from the candle pane — two instruments, one column
+        var flowPane = new Panel { Dock = DockStyle.Fill, BackColor = Pal.Card, Margin = new Padding(0), Padding = new Padding(0) };
+        _flow.Dock = DockStyle.Fill;
+        flowPane.Controls.Add(_flow);
+        charts.Controls.Add(flowPane, 0, 2);
 
         var logWrap = new Panel { Dock = DockStyle.Fill, BackColor = Pal.Panel, Margin = new Padding(0) };
         var logBar = new TableLayoutPanel { Dock = DockStyle.Top, Height = 26, ColumnCount = 6, RowCount = 1, BackColor = Pal.Panel, Margin = new Padding(0), Padding = new Padding(4, 2, 4, 2) };
@@ -283,7 +298,7 @@ public sealed class MainForm : Form
         {
             Gfx.HairH(e.Graphics, logBar.Bottom - 0.5f, 0, logWrap.Width, Pal.LineSoft);
         };
-        charts.Controls.Add(logWrap, 0, 2);
+        charts.Controls.Add(logWrap, 0, 3);
 
         // ---- right column
         var right = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Pal.Bg, Margin = new Padding(0, 6, 6, 6) };
@@ -390,10 +405,11 @@ public sealed class MainForm : Form
 
     Control BuildStatusBar()
     {
-        var bar = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = Pal.Bg, Margin = new Padding(0), Padding = new Padding(6, 3, 6, 3) };
+        // col0 sizes to the pills; the footer fills whatever remains and right-aligns, so a narrow
+        // window clips the footer's left edge instead of sliding it over the pills
+        var bar = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Pal.Bg, Margin = new Padding(0), Padding = new Padding(6, 3, 6, 3) };
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         var pills = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, BackColor = Pal.Bg, Margin = new Padding(0) };
         foreach (var p in new[] { _pillWarm, _pillPos, _pillLag, _pillBook, _pillHealth, _pillKill, _pillMd, _pillOrd })
         {
@@ -402,7 +418,7 @@ public sealed class MainForm : Form
             pills.Controls.Add(p);
         }
         bar.Controls.Add(pills, 0, 0);
-        bar.Controls.Add(_lblRight, 2, 0);
+        bar.Controls.Add(_lblRight, 1, 0);
         return bar;
     }
 
@@ -476,20 +492,11 @@ public sealed class MainForm : Form
     // ------------------------------------------------------------------ chart switching
     void ShowChart(int index)
     {
-        bool flow = index == 0;
-        _flow.Visible = flow;
-        _candles.Visible = !flow;
-        if (!flow)
-        {
-            TF tf = CandleSet.Order[Math.Clamp(index - 1, 0, CandleSet.Order.Length - 1)];
-            _candles.ShowTf(tf);
-            _lblChart.Text = Fmt.TfLong(tf) + " candles · wheel zoom, drag pan, L for log";
-        }
-        else
-        {
-            _lblChart.Text = "quote flow · wheel zoom, drag pan, hover for the readout";
-        }
-        _tabs.LiveDot = flow && _ui == UiState.Running;
+        // both charts are on screen at once; the tabs only steer the candle pane
+        TF tf = CandleSet.Order[Math.Clamp(index, 0, CandleSet.Order.Length - 1)];
+        _candles.ShowTf(tf);
+        _lblChart.Text = Fmt.TfLong(tf) + " candles · wheel zoom, drag pan, L for log";
+        _tabs.LiveDot = _ui == UiState.Running;
     }
 
     void ToggleSettings()
@@ -518,7 +525,8 @@ public sealed class MainForm : Form
         _btnKill.Enabled = s == UiState.Running && _host != null && !_host.Engine.Kill;
         _btnSettings.Enabled = s == UiState.Idle;
         _grid.Enabled = s == UiState.Idle;
-        _tabs.LiveDot = s == UiState.Running && _tabs.Selected == 0;
+        _tabs.LiveDot = s == UiState.Running;
+        _pillPaper.Visible = _settings.PaperTrading && s != UiState.Idle;
         if (s == UiState.Idle) _chip.Set("Idle", _host == null ? "no session" : "session stopped", StateTone.Idle, false);
         else if (s == UiState.Starting) _chip.Set("Starting", "spec + sockets", StateTone.Info, true);
         else if (s == UiState.Stopping) _chip.Set("Stopping", "flushing", StateTone.Warm, true);
@@ -543,6 +551,7 @@ public sealed class MainForm : Form
         if (!v.Warm) return ("Warming", $"{v.Samples} / {h.Config.WarmupSamples} samples", StateTone.Warm);
         if (v.LagNs > maxLagNs) return ("Lagging", $"{Fmt.Lag(v.LagNs)} over {Fmt.Lag(maxLagNs)}", StateTone.Warm);
         if (!v.IsHealthy) return ("Unhealthy", "book or position unknown", StateTone.Warm);
+        if ((v.FundsFlags & 3) == 3) return ("No funds", "insufficient balance — quoting paused", StateTone.Warm);
         if (!v.Quoting) return ("Waiting", "no signal", StateTone.Warm);
         return ("Quoting", $"bid {Fmt.Price(v.BestBid8, dec)}  ask {Fmt.Price(v.BestAsk8, dec)}", StateTone.Good);
     }
@@ -570,14 +579,12 @@ public sealed class MainForm : Form
     {
         _alert.Show(title, detail, tone);
         _alertUntil = Environment.TickCount64 + (tone == StateTone.Bad ? 60_000 : 9_000);
-        if (_root != null) _root.RowStyles[1].Height = 42;
     }
 
     void HideAlert()
     {
         _alertUntil = 0;
-        _alert.Visible = false;
-        if (_root != null) _root.RowStyles[1].Height = 0;
+        _alert.Show("", "", StateTone.Idle);
     }
 
     // ------------------------------------------------------------------ main loop
@@ -628,16 +635,27 @@ public sealed class MainForm : Form
         _tilePnl.SetCaption($"cash {Fmt.SignedUsd(v.CashUsd)} · mark {mark.ToString("N" + dec, Inv)}");
         _tilePnl.Push(pnl);
 
-        _gauge.Set(v.Pos8, cfg.MaxPos8, v.Base8, cfg.QuoteQty8, v.BlockFlags != 0);
+        // risk bits only: a funds block is explained by the funds cell and the quote rows
+        _gauge.Set(v.Pos8, cfg.MaxPos8, v.Base8, cfg.QuoteQty8, (v.BlockFlags & 3) != 0);
         _statPos.Set(0, "base", (v.Base8 / 1e8).ToString("F" + _qf, Inv), Pal.Text);
-        _statPos.Set(1, "avg entry", v.Fills > 0 && Math.Abs(posF) > 1e-12 ? (Math.Abs(v.CashUsd) / Math.Abs(posF)).ToString("N" + dec, Inv) : "-", Pal.TextDim);
+        long need8 = mark > 0 ? (long)(cfg.QuoteQty8 * mark) : 0;   // quote units for one buy
+        string fundsTxt = !v.QuoteKnown ? "—" : "$" + (v.QuoteAvail8 / 1e8).ToString("N2", Inv);
+        Color fundsInk = !v.QuoteKnown ? Pal.TextFaint
+            : v.QuoteAvail8 <= 0 ? Pal.DownLit
+            : (v.FundsFlags & 1) != 0 ? Pal.Warn
+            : need8 > 0 && v.QuoteAvail8 < need8 * 3 ? Pal.Warn : Pal.Text;
+        _statPos.Set(1, "funds", fundsTxt, fundsInk);
+        _statPos.Set(2, "avg entry", v.Fills > 0 && Math.Abs(posF) > 1e-12 ? (Math.Abs(v.CashUsd) / Math.Abs(posF)).ToString("N" + dec, Inv) : "-", Pal.TextDim);
+        long room8 = Math.Max(0, cfg.MaxPos8 - Math.Abs(v.Pos8));
+        _statPos.Set(3, "headroom", room8 < cfg.QuoteQty8 ? "0 · at limit" : (room8 / 1e8).ToString("F" + _qf, Inv),
+            room8 < cfg.QuoteQty8 ? Pal.Warn : Pal.TextDim);
         _statPerf.Set(0, "cash", Fmt.SignedUsd(v.CashUsd), v.CashUsd >= 0 ? Pal.Text : Pal.DownLit);
         _statPerf.Set(1, "micro", mark > 0 ? mark.ToString("N" + dec, Inv) : "-", Pal.Text);
         _statPerf.Set(2, "mid", v.Mid > 0 ? v.Mid.ToString("N" + dec, Inv) : "-", Pal.TextDim);
 
         // ---- quotes card
-        _rowBid.Set(v.BidQuote8, v.IntendedBid8, v.BestBid8, tick, dec, v.BidSlot, v.BidSentNs, v.RecvNs, (v.BlockFlags & 1) != 0);
-        _rowAsk.Set(v.AskQuote8, v.IntendedAsk8, v.BestAsk8, tick, dec, v.AskSlot, v.AskSentNs, v.RecvNs, (v.BlockFlags & 2) != 0);
+        _rowBid.Set(v.BidQuote8, v.IntendedBid8, v.BestBid8, tick, dec, v.BidSlot, v.BidSentNs, v.RecvNs, (v.BlockFlags & 1) != 0, (v.FundsFlags & 1) != 0);
+        _rowAsk.Set(v.AskQuote8, v.IntendedAsk8, v.BestAsk8, tick, dec, v.AskSlot, v.AskSentNs, v.RecvNs, (v.BlockFlags & 2) != 0, (v.FundsFlags & 2) != 0);
         long spread = v.BestAsk8 > v.BestBid8 && v.BestBid8 > 0 ? v.BestAsk8 - v.BestBid8 : 0;
         _statQuote.Set(0, "spread", spread > 0 ? $"{Fmt.Price(spread, dec)}  {(spread / (double)tick):F0}t" : "-", Pal.Text);
         _statQuote.Set(1, "our edge", v.BidQuote8 > 0 && v.AskQuote8 > 0 && spread > 0 ? $"{((v.BestBid8 - v.BidQuote8) / (double)tick):F0}t / {((v.AskQuote8 - v.BestAsk8) / (double)tick):F0}t" : "-", Pal.Text);
@@ -687,8 +705,8 @@ public sealed class MainForm : Form
         _statDiag.Set(5, "breaker trips", v.Trips.ToString("N0", Inv), v.Trips > 0 ? Pal.DownLit : Pal.TextDim);
         _statDiag.Set(6, "md resyncs", v.ResyncMd.ToString("N0", Inv), v.ResyncMd > 0 ? Pal.Warn : Pal.TextDim);
         _statDiag.Set(7, "divergences", v.Divergences.ToString("N0", Inv), v.Divergences > 0 ? Pal.Warn : Pal.TextDim);
-        _statDiag.Set(8, "exec sent", h.Exec.Sent.ToString("N0", Inv), Pal.TextDim);
-        _statDiag.Set(9, "exec dropped", h.Exec.Dropped.ToString("N0", Inv), h.Exec.Dropped > 0 ? Pal.DownLit : Pal.TextDim);
+        _statDiag.Set(8, "exec sent", h.ExecSent.ToString("N0", Inv), Pal.TextDim);
+        _statDiag.Set(9, "exec dropped", h.ExecDropped.ToString("N0", Inv), h.ExecDropped > 0 ? Pal.DownLit : Pal.TextDim);
         _cardDiag.Caption = $"{Fmt.Count(v.Frames)} frames · {v.Cmds} cmds";
 
         // ---- status pills
@@ -699,7 +717,25 @@ public sealed class MainForm : Form
         _pillHealth.Set(v.IsHealthy && v.Quoting ? StateTone.Good : v.Breaker ? StateTone.Bad : StateTone.Warm, v.Breaker ? "BRK" : v.Quoting ? "ok" : "-");
         _pillKill.Set(v.Killed || v.KillSent ? StateTone.Bad : StateTone.Good, v.Killed ? "KILLED" : v.KillSent ? "SENT" : "armed");
         _pillMd.Set(SocketTone(h.Md));
-        _pillOrd.Set(h.AuthRejected ? StateTone.Bad : SocketTone(h.Orders));
+        _pillOrd.Set(h.Paper ? StateTone.Info : h.AuthRejected ? StateTone.Bad : SocketTone(h.Orders), h.Paper ? "paper" : null);
+
+        // ---- funds: announce the transition once, not every frame
+        bool fundsBlocked = (v.FundsFlags & 3) != 0;
+        if (fundsBlocked && !_fundsShown)
+        {
+            _fundsShown = true;
+            string side = (v.FundsFlags & 3) == 3 ? "both sides" : (v.FundsFlags & 1) != 0 ? "buy side" : "sell side";
+            string avail = v.QuoteKnown ? "$" + (v.QuoteAvail8 / 1e8).ToString("N2", Inv) + " available" : "balance too low for a quote";
+            ShowAlert("Insufficient funds", $"{side} paused — {avail}", StateTone.Warm);
+            _tape.Add(TapeKind.Alert, false, "FUNDS", "", "", $"insufficient funds — {side} paused ({avail})");
+            AppendLogLine($"insufficient funds — {side} paused, {avail}");
+        }
+        else if (!fundsBlocked && _fundsShown)
+        {
+            _fundsShown = false;
+            _tape.Add(TapeKind.Info, false, "FUNDS", "", "", "balance available again — quoting resumed");
+            AppendLogLine("funds available again — quoting resumed");
+        }
 
         // ---- charts
         _flow.Tick8 = tick;
@@ -740,7 +776,7 @@ public sealed class MainForm : Form
 
         // ---- footer
         double up = _startedTs == 0 ? 0 : (ts - _startedTs) / (double)Stopwatch.Frequency;
-        _lblRight.Text = $"{Fmt.Clock(DateTime.Now)} · up {Fmt.Duration(up)} · {_fps:F1} fr/s · md {SockState(h.Md).ToLowerInvariant()} · orders {(h.AuthRejected ? "rejected" : SockState(h.Orders).ToLowerInvariant())}";
+        _lblRight.Text = $"{Fmt.Clock(DateTime.Now)} · up {Fmt.Duration(up)} · {_fps:F1} fr/s · md {SockState(h.Md).ToLowerInvariant()} · orders {(h.Paper ? "paper" : h.AuthRejected ? "rejected" : SockState(h.Orders).ToLowerInvariant())}";
     }
 
     // ------------------------------------------------------------------ commands
@@ -748,6 +784,7 @@ public sealed class MainForm : Form
     {
         var sb = new StringBuilder();
         sb.AppendLine($"gemx snapshot {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        sb.AppendLine($"mode       {(_settings.PaperTrading ? "paper (simulated fills)" : "live")}");
         sb.AppendLine($"state      {_stateText}");
         sb.AppendLine($"symbol     {_settings.Symbol}  price decimals {_pf}  qty decimals {_qf}");
         if (_host is { } h && h.Engine.TryReadView(out EngineView v))
@@ -758,6 +795,7 @@ public sealed class MainForm : Form
             sb.AppendLine($"quotes     bid {P(v.BidQuote8)} [{v.BidSlot}]   ask {P(v.AskQuote8)} [{v.AskSlot}]");
             sb.AppendLine($"intent     bid {P(v.IntendedBid8)}   ask {P(v.IntendedAsk8)}   blocks {v.BlockFlags}");
             sb.AppendLine($"position   {Fmt.Qty(v.Pos8 / 1e8, _qDec)}  base {Fmt.Qty(v.Base8 / 1e8, _qDec)}  cash {v.CashUsd:F2}");
+            sb.AppendLine($"funds      quote {(v.QuoteKnown ? "$" + (v.QuoteAvail8 / 1e8).ToString("N2", Inv) : "unknown")}  funds-blocked {v.FundsFlags}  risk-blocked {v.BlockFlags}  funds-rejects {v.FundsRejects}");
             sb.AppendLine($"signals    sigma {Math.Sqrt(Math.Max(0, v.Sigma2)):G4}  ofi {v.OfiNorm:F3}  lag {Fmt.Lag(v.LagNs)}  samples {v.Samples}/{c.WarmupSamples}");
             sb.AppendLine($"counters   frames {v.Frames}  faults {v.Fails}  cmds {v.Cmds}  fills {v.Fills}  trips {v.Trips}  resyncs {v.ResyncMd}  divergences {v.Divergences}");
             sb.AppendLine($"sockets    md {SockState(h.Md)}  orders {(h.AuthRejected ? "auth rejected" : SockState(h.Orders))}  sent {h.Exec.Sent}  dropped {h.Exec.Dropped}");
@@ -771,7 +809,7 @@ public sealed class MainForm : Form
         if (_ui != UiState.Idle) return;
         if (_drawer.Visible) ToggleSettings();   // the rail carries the live session telemetry
         SetUi(UiState.Starting);
-        AppendLogLine("start requested");
+        AppendLogLine(_settings.PaperTrading ? "start requested (paper — no orders will leave this machine)" : "start requested");
         try
         {
             _settings.Save();
@@ -795,8 +833,12 @@ public sealed class MainForm : Form
             _lastFills = _lastTrips = _lastResync = _lastDiv = _lastFails = 0;
             _stateText = "";
             _pnlKnown = false;
+            _fundsShown = false;
             _tape.Clear();
-            _tape.Add(TapeKind.Boot, false, "BOOT", "", "", $"session started on {_settings.Symbol} @ {_settings.RestHost}");
+            _tape.Add(TapeKind.Boot, false, "BOOT", "", "",
+                _settings.PaperTrading
+                    ? $"paper session started on {_settings.Symbol} — fills simulated locally, no live orders"
+                    : $"session started on {_settings.Symbol} @ {_settings.RestHost}");
             HideAlert();
             SetUi(UiState.Running);
             _ = _candles.LoadHistoryAsync(_settings.Symbol, h.PriceDecimals);

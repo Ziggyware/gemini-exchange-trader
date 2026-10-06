@@ -5,7 +5,7 @@ desktop terminal that streams a live view of it (`Gemx.App`), and a headless
 assertion harness (`Gemx.Check`).
 
 ```
-Gemx/        quote engine: book, engine, wire codec, rings, signals, transport
+Gemx/        quote engine: book, engine, wire codec, rings, signals, transport, paper exchange
 Gemx.App/    WinForms terminal (net8.0-windows, PerMonitorV2 DPI)
 Gemx.Check/  headless harness — asserts engine/signal/wire behaviour
 docs/        design previews
@@ -32,15 +32,16 @@ custom-drawn — there is no stock `DataGridView`, no default-looking `PropertyG
 in the main view, and no chrome that only exists to decorate.
 
 ```
-┌─ title ── logo · symbol chip · state chip ──────── start/stop/kill/settings ─┐
-│ alert row (collapses to 0 when idle)                                        │
+┌─ title ── logo · symbol chip · state chip ── [PAPER] · start/stop/kill/settings ─┐
+│ alert row (collapses to 0 when idle)                                           │
 ├──────────────┬────────────────────────────────────┬────────────────────────┤
 │  left rail   │  centre                            │  right dock            │
-│  Position    │  Flow | 1m | 5m | 15m | 30m | 1h…  │  Depth (ladder)        │
+│  Position    │  1m | 5m | 15m | 30m | 1h | 1d…    │  Depth (ladder)        │
 │  Performance │  ┌──────────────────────────────┐  │                        │
-│  Live quotes │  │  quote-flow chart            │  │  Activity (tape)       │
-│  Signals     │  │  or candle strip             │  │                        │
-│  Diagnostics │  └──────────────────────────────┘  │                        │
+│  Live quotes │  │  candle strip (selected TF)  │  │  Activity (tape)       │
+│  Signals     │  ├──────────────────────────────┤  │                        │
+│  Diagnostics │  │  quote-flow chart (always)   │  │                        │
+│              │  └──────────────────────────────┘  │                        │
 │              │  log strip (collapses to 26 px)    │                        │
 ├──────────────┴────────────────────────────────────┴────────────────────────┤
 │ status bar: warm · pos · lag · book · health · kill · md · orders · clock    │
@@ -69,6 +70,42 @@ had any visual weight. The rework:
 - Wording is shortened to the information-dense part: `Δ 3t` rather than
   "distance to touch: 3 ticks", `2t` rather than "requote threshold: 2 ticks".
 
+### Both charts, at once
+
+The centre column no longer makes you flip between views: the candle strip sits on top and the
+quote-flow chart is permanently below it (56 / 44 split, collapsible log underneath). The tab
+row now only picks the candle timeframe — the flow chart keeps its own legend title, takes wheel
+focus on hover and stays live regardless of which timeframe is selected.
+
+### Insufficient funds
+
+Quoting used to discover a missing balance the hard way — repeated rejects until the breaker
+tripped. Now:
+
+- the engine tracks the quote-currency balance from `balanceUpdate` frames (the parser matches
+  the asset derived from `Symbol - BaseAsset`, or the explicit `QuoteAsset` setting) and refuses
+  buys it cannot pay for *before* they reach the exchange;
+- a venue reject whose reason says "insufficient" pauses just that side for a 10 s backoff
+  instead of feeding the reject counter that trips the breaker; the next balance update reopens
+  it immediately;
+- the Position card carries a `funds` cell (spendable quote) next to base, avg entry and
+  position headroom, coloured amber before it hits zero;
+- blocked quote rows say `no funds` in red rather than a generic warning, and the transition
+  raises one warm alert plus a tape/log entry instead of repeating itself every frame.
+
+### Paper trading
+
+`Settings → Session → PaperTrading` quotes against the live feed but fills locally:
+
+- no API keys are required and the authenticated order socket is never opened;
+- starting balances (`PaperCashUsd`, `PaperBaseQty`) are seeded into the engine as a normal
+  balance update, so position, P&L and the funds check all behave exactly as they do live;
+- `PaperExchange` answers every command with the same wire shapes the engine parses — place
+  acks, `orderUpdate` lifecycle and `balanceUpdate` after each fill — and enforces the seeded
+  balances, so an unaffordable buy is rejected just like the venue would;
+- a `PAPER` badge sits beside the transport buttons for the whole session, the `ORDERS` pill
+  reads `paper`, and stop/kill flush through the same paths as live (nothing was ever sent).
+
 ### Interaction
 
 | Where | Input | Effect |
@@ -86,6 +123,7 @@ had any visual weight. The rework:
 | Log | drag | selects text; buttons mirror Copy/Clear/Follow |
 | Global | `F5` / `F6` / `Esc` | start / stop |
 | Global | `Ctrl+K` | kill switch (flatten + halt) |
+| Tabs | click / `←` `→` | pick the candle timeframe — both charts stay on screen |
 | Global | `Ctrl+L` / `Ctrl+J` / `Ctrl+,` / `Ctrl+S` / `Ctrl+D` | clear log / toggle log / settings / save / diagnostics |
 
 Small details worth noticing: the state chip breathes while quoting, the charts
@@ -99,11 +137,15 @@ disappear, and value tiles flash in the direction of the change.
 All rendering lives in `Gemx.App/Ui`. The design tokens are in `Theme.cs` and the
 drawing helpers are shared, so every control answers the same questions the same
 way (hairlines at the DPI-correct width, gradients that never band, text that
-never lands on a half pixel).
+never lands on a half pixel). Controls size themselves from `Gfx.MeasureGraphics`,
+a cached measuring surface at the control's own DPI — the same font, tracking and
+scale the paint call uses — so labels, pills and buttons can never be measured by
+one system (GDI) and drawn by another (GDI+), which is what used to squish the
+status pills on high-DPI screens.
 
 | File | Responsibility |
 |---|---|
-| `Ui/Theme.cs` | `Pal` palette (+`Alpha`/`Mix`/`StateColor`), `Fonts` (Segoe UI + Consolas), `Fmt` (invariant formatting), `Cache` (pens/brushes/gradient pools, bounded), `Grad` (gradient fills + eviction that disposes), `Gfx` (hairlines, rounded rects, glow strokes, dots, drop shadows, tracking, measuring), `Glyph`/`Icons`, `Animator` (one shared 33 ms timer), `UiControl` (DPI-aware `Surface`/`S()`/`Rect()`, `Animate()` hook) |
+| `Ui/Theme.cs` | `Pal` palette (+`Alpha`/`Mix`/`StateColor`), `Fonts` (Segoe UI + Consolas), `Fmt` (invariant formatting), `Cache` (pens/brushes/gradient pools, bounded), `Grad` (gradient fills + eviction that disposes), `Gfx` (hairlines, rounded rects, glow strokes, dots, drop shadows, tracking, DPI-correct measuring via `MeasureGraphics`), `Glyph`/`Icons`, `Animator` (one shared 33 ms timer), `UiControl` (DPI-aware `Surface`/`S()`/`Rect()`, `Animate()` hook) |
 | `Ui/Widgets.cs` | `Spark`, `LogoMark`, `StateChip`, `StatusPill`, `ToolButton`, `Segments`, `AlertBanner`, `MetricTile`, `StatGrid`, `MeterBar`, `InventoryGauge`, `QuoteRow`, `Card`, `CardStack` |
 | `Ui/Ladder.cs` | `DepthLadder` — 2–12 levels, synced to the book, own-quote highlighting |
 | `Ui/Tape.cs` | `TapeView` — 400-entry ring, per-kind accent rails, hover/scroll/copy |

@@ -82,6 +82,9 @@ internal static class Fonts
     public static readonly Font MonoBold = new("Consolas", 9f, FontStyle.Bold, GraphicsUnit.Point);
     public static readonly Font MonoSmall = new("Consolas", 8f, FontStyle.Regular, GraphicsUnit.Point);
     public static readonly Font MonoTiny = new("Consolas", 7.25f, FontStyle.Regular, GraphicsUnit.Point);
+    // status-bar pills: one step larger than the old 7.25 pt micro type so readings stay legible
+    public static readonly Font Pill = new("Segoe UI", 8f, FontStyle.Bold, GraphicsUnit.Point);
+    public static readonly Font PillValue = new("Consolas", 8f, FontStyle.Regular, GraphicsUnit.Point);
     public static readonly Font MonoMid = new("Consolas", 11f, FontStyle.Bold, GraphicsUnit.Point);
     public static readonly Font MonoBig = new("Consolas", 15f, FontStyle.Bold, GraphicsUnit.Point);
     public static readonly Font MonoHuge = new("Consolas", 19f, FontStyle.Regular, GraphicsUnit.Point);
@@ -352,11 +355,29 @@ internal static class Gfx
         Alignment = StringAlignment.Far
     };
 
-    static readonly Dictionary<(string, string, float, int), SizeF> _measure = new(512);
+    static readonly Dictionary<(string, string, float, int, int), SizeF> _measure = new(512);
+
+    /// A Graphics used only for measuring. GDI+ scales point fonts by the graphics DPI, so a
+    /// measurement surface must match the DPI the text will actually be drawn at — otherwise
+    /// width calculations are wrong on any monitor that is not at 96 DPI.
+    static readonly Dictionary<int, (Bitmap Bmp, Graphics G)> _measureG = new(4);
+
+    public static Graphics MeasureGraphics(int dpi)
+    {
+        if (dpi < 96) dpi = 96;
+        if (!_measureG.TryGetValue(dpi, out var t))
+        {
+            var bmp = new Bitmap(1, 1);
+            bmp.SetResolution(dpi, dpi);
+            t = (bmp, Graphics.FromImage(bmp));
+            _measureG[dpi] = t;
+        }
+        return t.G;
+    }
 
     public static SizeF Measure(Graphics g, string s, Font f, StringFormat? sf = null)
     {
-        var key = (s, f.FontFamily.Name, f.Size, (int)f.Style);
+        var key = (s, f.FontFamily.Name, f.Size, (int)f.Style, (int)g.DpiX);
         if (sf == null && _measure.TryGetValue(key, out SizeF cached)) return cached;
         SizeF sz = g.MeasureString(s, f, new SizeF(8192, 512), sf ?? Sf);
         if (sf == null)

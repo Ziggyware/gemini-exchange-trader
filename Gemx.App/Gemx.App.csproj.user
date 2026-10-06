@@ -8,5 +8,14 @@
     <Compile Update="QuoteChart.cs">
       <SubType>Component</SubType>
     </Compile>
+    <Compile Update="Ui\Ladder.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Update="Ui\LogView.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Update="Ui\Tape.cs">
+      <SubType>Component</SubType>
+    </Compile>
   </ItemGroup>
 </Project>

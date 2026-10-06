@@ -49,7 +49,7 @@ internal sealed class LogView : UserControl
         string upper = body.ToUpperInvariant();
         if (upper.Contains("ERROR") || upper.Contains("FAIL") || upper.Contains("REJECT") || upper.Contains("401") || upper.Contains("403") || upper.Contains("NOT CONFIRMED"))
             ink = Pal.DownLit;
-        else if (upper.Contains("TRIP") || upper.Contains("BREAKER") || upper.Contains("KILL") || upper.Contains("WARN") || upper.Contains("OVERFLOW") || upper.Contains("GAP"))
+        else if (upper.Contains("TRIP") || upper.Contains("BREAKER") || upper.Contains("KILL") || upper.Contains("WARN") || upper.Contains("OVERFLOW") || upper.Contains("GAP") || upper.Contains("INSUFFICIENT"))
             ink = Pal.Warn;
         else if (upper.Contains("FILL") || upper.Contains("STOPPED") || upper.Contains("ACK"))
             ink = Pal.UpLit;

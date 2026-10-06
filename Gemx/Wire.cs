@@ -22,6 +22,11 @@ public struct Msg
     public int Code;
     public long BalAvail, BalTotal;
     public bool HasBal;
+    // quote-currency (e.g. USD) balance of the same update; only set when the frame carried it
+    public long QuoteAvail, QuoteTotal;
+    public bool HasQuote;
+    // reject/ack text said the balance was too small to open the order
+    public bool NoFunds;
     public int NBid, NAsk;
 }
 
@@ -72,12 +77,14 @@ public sealed class FrameParser
 {
     readonly SymbolTable _syms;
     readonly byte[] _base;
+    readonly byte[]? _quote;
     public readonly long[] BidPx, BidQty, AskPx, AskQty;
 
-    public FrameParser(SymbolTable syms, string baseAsset, int maxLevels = 1 << 15)
+    public FrameParser(SymbolTable syms, string baseAsset, string? quoteAsset = null, int maxLevels = 1 << 15)
     {
         _syms = syms;
         _base = Encoding.ASCII.GetBytes(baseAsset);
+        _quote = string.IsNullOrWhiteSpace(quoteAsset) ? null : Encoding.ASCII.GetBytes(quoteAsset.Trim());
         BidPx = new long[maxLevels];
         BidQty = new long[maxLevels];
         AskPx = new long[maxLevels];
@@ -128,18 +135,26 @@ public sealed class FrameParser
         bool found = false;
         while (r.Read() && r.TokenType == JsonTokenType.StartObject)
         {
-            bool match = false;
+            bool match = false, qmatch = false;
             long f = 0, c = 0;
             while (r.Read() && r.TokenType == JsonTokenType.PropertyName)
             {
                 ReadOnlySpan<byte> k = r.ValueSpan;
                 r.Read();
-                if (k.Length == 1 && k[0] == (byte)'a') match = r.TokenType == JsonTokenType.String && Ascii.EqualsIgnoreCase(r.ValueSpan, _base);
+                if (k.Length == 1 && k[0] == (byte)'a')
+                {
+                    if (r.TokenType == JsonTokenType.String)
+                    {
+                        match = Ascii.EqualsIgnoreCase(r.ValueSpan, _base);
+                        qmatch = _quote != null && Ascii.EqualsIgnoreCase(r.ValueSpan, _quote);
+                    }
+                }
                 else if (k.Length == 1 && k[0] == (byte)'f') { if (!Dec(ref r, out f)) return false; }
                 else if (k.Length == 1 && k[0] == (byte)'c') { if (!Dec(ref r, out c)) return false; }
                 else r.Skip();
             }
             if (match) { m.BalAvail = f; m.BalTotal = c; m.HasBal = true; found = true; }
+            if (qmatch) { m.QuoteAvail = f; m.QuoteTotal = c; m.HasQuote = true; }
         }
         if (!found)
         {
@@ -148,7 +163,22 @@ public sealed class FrameParser
             m.BalTotal = 0;
             m.HasBal = true;
         }
+        // an update that never mentions the quote asset carries no information about it
         return true;
+    }
+
+    // case-insensitive "needle in haystack" over raw bytes; both sides are folded with the same
+    // mask, so digits, spaces and punctuation compare exactly as written.
+    static bool ContainsNoCase(ReadOnlySpan<byte> hay, ReadOnlySpan<byte> needle)
+    {
+        if (needle.Length == 0 || hay.Length < needle.Length) return false;
+        for (int i = 0; i <= hay.Length - needle.Length; i++)
+        {
+            int j = 0;
+            while (j < needle.Length && (hay[i + j] | 0x20) == (needle[j] | 0x20)) j++;
+            if (j == needle.Length) return true;
+        }
+        return false;
     }
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public bool TryParse(ReadOnlySpan<byte> f, out Msg m)
@@ -223,6 +253,11 @@ public sealed class FrameParser
                 }
                 else if (k.SequenceEqual("id"u8)) { hasId = true; if (!Int(ref r, out m.ReqId)) return false; }
                 else if (k.SequenceEqual("status"u8)) { if (Int(ref r, out long c)) m.Code = (int)c; else r.Skip(); }
+                else if (k.SequenceEqual("reason"u8) || k.SequenceEqual("message"u8))
+                {
+                    // "Insufficient funds" / "InsufficientFunds" / "insufficient balance"...
+                    if (r.TokenType == JsonTokenType.String && ContainsNoCase(r.ValueSpan, "insufficient"u8)) m.NoFunds = true;
+                }
                 else if (k.SequenceEqual("result"u8))
                 {
                     if (r.TokenType == JsonTokenType.StartObject)
