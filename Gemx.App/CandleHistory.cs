@@ -21,7 +21,8 @@ public static class CandleHistory
             double h = el[2].GetDouble();
             double l = el[3].GetDouble();
             double c = el[4].GetDouble();
-            list.Add(new Candle{ StartNs = tsMs * 1_000_000L, O=o, H=h, L=l, C=c, Ticks=1 });
+            double v = el.GetArrayLength() > 5 ? el[5].GetDouble() : 0;
+            list.Add(new Candle{ StartNs = tsMs * 1_000_000L, O=o, H=h, L=l, C=c, V=v, Ticks=1 });
         }
         list.Sort((a,b)=>a.StartNs.CompareTo(b.StartNs));
         if(list.Count>limit) list = list.TakeLast(limit).ToList();
@@ -60,6 +61,7 @@ public static class CandleHistory
             H = kv.Value.Max(x=>x.H),
             L = kv.Value.Min(x=>x.L),
             C = kv.Value.Last().C,
+            V = kv.Value.Sum(x=>x.V),
             Ticks = kv.Value.Count
         }).ToList();
     }
@@ -80,6 +82,7 @@ public static class CandleHistory
             H = kv.Value.Max(x=>x.H),
             L = kv.Value.Min(x=>x.L),
             C = kv.Value.Last().C,
+            V = kv.Value.Sum(x=>x.V),
             Ticks = kv.Value.Count
         }).ToList();
     }

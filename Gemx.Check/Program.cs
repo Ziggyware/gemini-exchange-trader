@@ -192,6 +192,19 @@ static class P
         T.Ok("parse.ack_place", m.Kind == Kind.Ack && m.ReqId == 7 && m.Code == 200 && m.ExchOrderId == 4242);
         p.TryParse(B("{\"id\":\"1\",\"status\":200}"), out m);
         T.Ok("parse.ack_sub", m.Kind == Kind.Ack && m.ReqId == 1 && m.Code == 200);
+
+        // quote-currency balance + insufficient-funds rejects
+        var qp = new FrameParser(new SymbolTable(S), "BTC", "USD");
+        qp.TryParse(B("{\"e\":\"balanceUpdate\",\"E\":1,\"u\":1,\"B\":[{\"a\":\"USD\",\"f\":\"207.39\",\"c\":\"210.5\"},{\"a\":\"BTC\",\"f\":\"1.5\",\"c\":\"1.5\"}]}"), out m);
+        T.Ok("parse.quote_balance", m.Kind == Kind.Balance && m.HasBal && m.BalTotal == 150_000_000 && m.HasQuote && m.QuoteAvail == 20_739_000_000 && m.QuoteTotal == 21_050_000_000);
+        qp.TryParse(B("{\"e\":\"balanceUpdate\",\"E\":2,\"u\":2,\"B\":[{\"a\":\"BTC\",\"f\":\"2\",\"c\":\"2\"}]}"), out m);
+        T.Ok("parse.quote_absent_is_unknown", m.HasBal && !m.HasQuote);
+        qp.TryParse(B("{\"id\":\"7\",\"status\":400,\"reason\":\"InsufficientFunds\",\"message\":\"balance too small\"}"), out m);
+        T.Ok("parse.ack_insufficient", m.Kind == Kind.Ack && m.ReqId == 7 && m.Code == 400 && m.NoFunds);
+        qp.TryParse(B("{\"id\":\"8\",\"status\":400,\"reason\":\"InvalidOrder\"}"), out m);
+        T.Ok("parse.other_reject_not_funds", m.Code == 400 && !m.NoFunds);
+        qp.TryParse(B("{\"e\":\"orderUpdate\",\"E\":3,\"s\":\"" + S + "\",\"i\":9,\"c\":\"z0000000000000001\",\"X\":\"REJECTED\",\"reason\":\"insufficient balance\"}"), out m);
+        T.Ok("parse.order_insufficient", m.Kind == Kind.Order && m.St == Status.Rejected && m.NoFunds);
         p.TryParse(B("{\"E\":1,\"s\":\"GEMI-BTC05M2606011000-UP\",\"t\":3,\"p\":\"0.50\",\"q\":\"10\",\"m\":true}"), out m);
 
         T.Ok("parse.trade_none", m.Kind == Kind.None);
@@ -369,6 +382,82 @@ static class P
         T.Ok("engine.depth_gap_requests_resync", e5.ResyncMd == r0 + 1);
     }
 
+    // quote-currency awareness: buys are gated by the spendable balance, a venue-side
+    // insufficient-funds reject latches the side without tripping the breaker, and a fresh
+    // balance update reopens quoting.
+    static void Funds()
+    {
+        var q = new SpscRing<Cmd>(1 << 16);
+        var e = new Engine(Cfg(), new FrameParser(new SymbolTable(S), "BTC", "USD"), q);
+        var cmds = new List<Cmd>();
+        void Send(int ring, string j, long ns) { var b = B(j); e.OnFrame(ring, b, ns); while (q.TryRead(out Cmd c)) cmds.Add(c); }
+        long ns = 1_000_000_000_000;
+        Send(1, Bal(ns, "1"), ns);   // $5 spendable, 1 BTC
+        for (int i = 0; i < 6; i++) { ns += 100_000_000; Send(0, Tick(ns, "95000.00", "1", "95000.10", "1"), ns); }
+        var places = cmds.Where(c => c.Kind == CmdKind.Place).ToArray();
+        T.Ok("funds.sell_only_when_cash_short", places.Length == 1 && places[0].Sell,
+            string.Join(",", cmds.Select(c => c.Kind + ":" + (c.Sell ? "S" : "B"))));
+        e.TryReadView(out EngineView v);
+        T.Ok("funds.bid_blocked_and_balance_known", (v.FundsFlags & 1) != 0 && v.QuoteKnown && v.QuoteAvail8 == 500_000_000, $"flags={v.FundsFlags} avail={v.QuoteAvail8}");
+
+        // the venue rejects the resting ask for balance reasons: latch the side, no breaker trip
+        Cmd askCmd = places[0];
+        Send(1, $"{{\"id\":\"{askCmd.ReqId}\",\"status\":400,\"reason\":\"Insufficient funds\"}}", ns);
+        ns += 100_000_000; Send(0, Tick(ns, "95000.00", "1", "95000.10", "1"), ns);
+        e.TryReadView(out v);
+        T.Ok("funds.reject_latches_without_trip", (v.FundsFlags & 2) != 0 && v.FundsRejects == 1 && e.Trips == 0,
+            $"flags={v.FundsFlags} rejects={v.FundsRejects} trips={e.Trips}");
+
+        // top-up: the balance update clears the latch and both sides may quote again
+        cmds.Clear();
+        ns += 100_000_000;
+        Send(1, $"{{\"e\":\"balanceUpdate\",\"E\":{ns},\"u\":{ns},\"B\":[{{\"a\":\"USD\",\"f\":\"10000\",\"c\":\"10000\"}},{{\"a\":\"BTC\",\"f\":\"1\",\"c\":\"1\"}}]}}", ns);
+        for (int i = 0; i < 3; i++) { ns += 100_000_000; Send(0, Tick(ns, "95000.00", "1", "95000.10", "1"), ns); }
+        places = cmds.Where(c => c.Kind == CmdKind.Place).ToArray();
+        T.Ok("funds.reopens_after_topup", places.Length == 2 && places.Count(c => !c.Sell) == 1,
+            string.Join(",", cmds.Select(c => c.Kind + ":" + (c.Sell ? "S" : "B"))));
+    }
+
+    // engine + PaperExchange end to end: seed balances, ack both quotes, fill the bid when the
+    // market trades through it, and let the balance frame keep the engine's position in step.
+    static void Paper()
+    {
+        var q = new SpscRing<Cmd>(1 << 16);
+        var od = new FrameRing(1 << 12);
+        var e = new Engine(Cfg(), new FrameParser(new SymbolTable(S), "BTC", "USD"), q);
+        var p = new PaperExchange(q, od, e, S, "BTC", "USD", 1_000_000, 500_000_000_000);   // 0.01 BTC + $5,000
+        long ns = 1_000_000_000_000;
+        void ToEngine() { while (od.TryPeek(out ReadOnlySpan<byte> fr, out long fns)) { var copy = fr.ToArray(); e.OnFrame(1, copy, fns); od.Release(); } }
+
+        p.Pump(ns);
+        ToEngine();
+        e.TryReadView(out EngineView v);
+        T.Ok("paper.seed_reaches_engine", v.QuoteKnown && v.QuoteAvail8 == 500_000_000_000 && v.Base8 == 1_000_000,
+            $"avail={v.QuoteAvail8} base={v.Base8}");
+
+        for (int i = 0; i < 6; i++) { ns += 100_000_000; e.OnFrame(0, B(Tick(ns, "95000.00", "1", "95000.10", "1")), ns); ToEngine(); }
+        int places = 0;
+        while (q.TryRead(out Cmd c)) { if (c.Kind == CmdKind.Place) places++; p.Handle(in c, ns); }
+        ToEngine();
+        e.TryReadView(out v);
+        T.Ok("paper.ack_makes_quotes_live", places == 2 && v.BidSlot == Slot.Live && v.AskSlot == Slot.Live,
+            $"places={places} bid={v.BidSlot} ask={v.AskSlot}");
+        long bid8 = v.BidQuote8;
+        T.Ok("paper.bid_below_touch", bid8 > 0 && bid8 < 9_500_010_000_000, $"bid={bid8}");
+
+        // the market trades down through our resting bid → simulated fill
+        ns += 100_000_000;
+        e.OnFrame(0, B(Tick(ns, "94980.00", "1", "94980.10", "1")), ns);
+        if (e.TryReadView(out EngineView vx)) p.Match(in vx, ns);
+        ToEngine();
+        p.Pump(ns);   // hands the engine's requote cancels to the exchange as well
+        ToEngine();
+        T.Ok("paper.fill_updates_position", p.Fills == 1 && e.Pos8 == 1_000_000, $"fills={p.Fills} pos={e.Pos8}");
+        e.TryReadView(out v);
+        T.Ok("paper.fill_balance_follows", v.QuoteAvail8 == p.QuoteAvail8 && v.QuoteAvail8 < 500_000_000_000 && e.CashUsd < 0,
+            $"view={v.QuoteAvail8} paper={p.QuoteAvail8} cash={e.CashUsd}");
+    }
+
     static byte[][] Stream(int n, out long[] nss, int seed)
     {
         var rnd = new Random(seed);
@@ -511,7 +600,7 @@ static class P
 
     public static int Main()
     {
-        Fixed(); Rings(); Book(); Parser(); Auth(); Executor(); Signal(); Quote(); Scenario(); NoAlloc(); Determinism(); Replay();
+        Fixed(); Rings(); Book(); Parser(); Auth(); Executor(); Signal(); Quote(); Scenario(); Funds(); Paper(); NoAlloc(); Determinism(); Replay();
         Console.WriteLine($"pass={T.Pass} fail={T.Fail}");
         return T.Fail == 0 ? 0 : 1;
     }

@@ -66,8 +66,9 @@ public sealed class Signals
             if (k >= 1)
             {
                 double ret = mid - _gridMid;
-                double s2 = Sigma2 * Math.Pow(1 - _lambda, k - 1);
-                Sigma2 = (1 - _lambda) * s2 + _lambda * ret * ret / _gridSec;
+                double a = Math.Pow(1 - _lambda, k);
+                // ret spans k grid steps: per-second variance is ret^2 / (k * gridSec)
+                Sigma2 = a * Sigma2 + (1 - a) * ret * ret / (k * _gridSec);
                 _gridNs += k * _stepNs;
                 _gridMid = mid;
                 Samples = (int)Math.Min(int.MaxValue, Samples + k);
