@@ -6,3 +6,6 @@ obj/
 /obj/
 /.vscode/
 /.vs/
+.freebuff/
+/bin
+/obj

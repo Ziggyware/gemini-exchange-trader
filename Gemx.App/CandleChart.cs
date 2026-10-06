@@ -163,7 +163,7 @@ internal sealed class CandleStrip : UiControl
         if (_dragging)
         {
             int step = Math.Max(2, (int)(_dxSize));
-            int dx = _dragStart.X - e.X;
+            int dx = e.X- _dragStart.X;
             if (Math.Abs(dx) >= step)
             {
                 int dir = Math.Sign(dx);
@@ -345,9 +345,9 @@ internal sealed class CandleStrip : UiControl
     void DrawGrid(Graphics g, RectangleF price, double lo, double hi, float gutter)
     {
         double step = Gfx.NiceStep(hi - lo, Math.Max(2, (int)(price.Height / S(30))));
-        int first = (int)Math.Ceiling(lo / step);
-        int last = (int)Math.Floor(hi / step);
-        for (int i = first; i <= last; i++)
+        long first = (long)Math.Ceiling(lo / step);
+        long last = (long)Math.Floor(hi / step);
+        for (long i = first; i <= last; i++)
         {
             double v = i * step;
             float y = Yp(price, v, lo, hi);

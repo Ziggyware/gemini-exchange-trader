@@ -73,7 +73,7 @@ public sealed class MainForm : Form
     readonly Card _cardPerf = new("Performance", "target", Pal.Accent, 140);
     readonly Card _cardQuotes = new("Live quotes", "layers", Pal.Violet, 176);
     readonly Card _cardSignals = new("Signals", "wave", Pal.Warn, 186);
-    readonly Card _cardDiag = new("Diagnostics", "depth", Pal.Neutral, 194);
+    readonly Card _cardDiag = new("Diagnostics", "depth", Pal.Neutral, 200);
 
     readonly StatusPill _pillWarm = new("WARM");
     readonly StatusPill _pillPos = new("POS");
@@ -303,18 +303,18 @@ public sealed class MainForm : Form
         // ---- right column
         var right = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Pal.Bg, Margin = new Padding(0, 6, 6, 6) };
         right.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        right.RowStyles.Add(new RowStyle(SizeType.Percent, 58));
-        right.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
+        right.RowStyles.Add(new RowStyle(SizeType.Percent, 80));
+        right.RowStyles.Add(new RowStyle(SizeType.Percent, 20));
 
         _ladder.Dock = DockStyle.Fill;
         _ladder.Surface = Pal.Card;
-        var depthCard = new Card("Depth", "depth", Pal.Info, 400) { Collapsible = false };
+        var depthCard = new Card("Depth", "depth", Pal.Info, 100) { Collapsible = false, Height = 700, Width = 500};
         depthCard.Accent = Pal.Info;
         depthCard.Body.Controls.Add(_ladder);
         right.Controls.Add(depthCard, 0, 0);
 
         _tape.Dock = DockStyle.Fill;
-        var tapeCard = new Card("Activity", "pulse", Pal.Accent, 300) { Collapsible = false, Caption = "newest first" };
+        var tapeCard = new Card("Activity", "pulse", Pal.Accent, 100) { Collapsible = false, Caption = "newest first", Width = 500, Height = 300 };
         tapeCard.Body.Controls.Add(_tape);
         right.Controls.Add(tapeCard, 0, 1);
 
@@ -627,8 +627,8 @@ public sealed class MainForm : Form
 
         double posF = v.Pos8 / 1e8;
         _tilePos.Accent = Math.Abs(v.Pos8) >= cfg.MaxPos8 ? Pal.Warn : Pal.Up;
-        _tilePos.SetValue(posF.ToString("F" + _qf, Inv), Math.Abs(v.Pos8) >= cfg.MaxPos8 ? Pal.Warn : Pal.TextHi, 0);
-        _tilePos.SetCaption($"limit ±{(cfg.MaxPos8 / 1e8).ToString("F" + _qf, Inv)} · quote {(cfg.QuoteQty8 / 1e8).ToString("F" + _qf, Inv)}");
+        _tilePos.SetValue(posF.ToString(_qf, Inv), Math.Abs(v.Pos8) >= cfg.MaxPos8 ? Pal.Warn : Pal.TextHi, 0);
+        _tilePos.SetCaption($"limit ±{(cfg.MaxPos8 / 1e8).ToString(_qf, Inv)} · quote {(cfg.QuoteQty8 / 1e8).ToString(_qf, Inv)}");
         _tilePos.Push(posF);
 
         _tilePnl.SetValue(Fmt.SignedUsd(pnl), pnl >= 0 ? Pal.UpLit : Pal.DownLit, dir);
@@ -637,7 +637,7 @@ public sealed class MainForm : Form
 
         // risk bits only: a funds block is explained by the funds cell and the quote rows
         _gauge.Set(v.Pos8, cfg.MaxPos8, v.Base8, cfg.QuoteQty8, (v.BlockFlags & 3) != 0);
-        _statPos.Set(0, "base", (v.Base8 / 1e8).ToString("F" + _qf, Inv), Pal.Text);
+        _statPos.Set(0, "base", (v.Base8 / 1e8).ToString(_qf, Inv), Pal.Text);
         long need8 = mark > 0 ? (long)(cfg.QuoteQty8 * mark) : 0;   // quote units for one buy
         string fundsTxt = !v.QuoteKnown ? "—" : "$" + (v.QuoteAvail8 / 1e8).ToString("N2", Inv);
         Color fundsInk = !v.QuoteKnown ? Pal.TextFaint
@@ -647,7 +647,7 @@ public sealed class MainForm : Form
         _statPos.Set(1, "funds", fundsTxt, fundsInk);
         _statPos.Set(2, "avg entry", v.Fills > 0 && Math.Abs(posF) > 1e-12 ? (Math.Abs(v.CashUsd) / Math.Abs(posF)).ToString("N" + dec, Inv) : "-", Pal.TextDim);
         long room8 = Math.Max(0, cfg.MaxPos8 - Math.Abs(v.Pos8));
-        _statPos.Set(3, "headroom", room8 < cfg.QuoteQty8 ? "0 · at limit" : (room8 / 1e8).ToString("F" + _qf, Inv),
+        _statPos.Set(3, "headroom", room8 < cfg.QuoteQty8 ? "0 · at limit" : (room8 / 1e8).ToString(_qf, Inv),
             room8 < cfg.QuoteQty8 ? Pal.Warn : Pal.TextDim);
         _statPerf.Set(0, "cash", Fmt.SignedUsd(v.CashUsd), v.CashUsd >= 0 ? Pal.Text : Pal.DownLit);
         _statPerf.Set(1, "micro", mark > 0 ? mark.ToString("N" + dec, Inv) : "-", Pal.Text);
@@ -748,9 +748,9 @@ public sealed class MainForm : Form
         {
             long n = v.Fills - _lastFills;
             _lastFills = v.Fills;
-            _tape.Add(TapeKind.Fill, v.LastFillSell, v.LastFillSell ? "SELL" : "BUY", Fmt.Price(v.LastFillPx8, dec), n > 1 ? "x" + n : Fmt.Qty(cfg.QuoteQty8, h.QtyDecimals), $"position {posF.ToString("F" + _qf, Inv)}");
+            _tape.Add(TapeKind.Fill, v.LastFillSell, v.LastFillSell ? "SELL" : "BUY", Fmt.Price(v.LastFillPx8, dec), n > 1 ? "x" + n : Fmt.Qty(cfg.QuoteQty8, h.QtyDecimals), $"position {posF.ToString(_qf, Inv)}");
             _flow.MarkFill(v.LastFillSell, v.LastFillPx8);
-            AppendLogLine($"fill {(v.LastFillSell ? "sell" : "buy")} {Fmt.Price(v.LastFillPx8, dec)} x{n} → pos {posF.ToString("F" + _qf, Inv)}");
+            AppendLogLine($"fill {(v.LastFillSell ? "sell" : "buy")} {Fmt.Price(v.LastFillPx8, dec)} x{n} → pos {posF.ToString(_qf, Inv)}");
         }
         if (v.Trips != _lastTrips)
         {

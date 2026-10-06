@@ -34,10 +34,15 @@ internal sealed class DepthLadder : UiControl
     {
         Surface = Pal.Card;
         Font = Fonts.Mono;
+        Height = 56 + 12 * 20;
     }
 
     /// Requested depth. Wheel over the ladder raises or lowers it.
-    public int Levels { get; set; } = 6;
+    public int Levels
+    {
+        get => _levelsReq;
+        set { _levelsReq = Math.Clamp(value, 2, MaxLevels); Parent?.PerformLayout(this, "PreferredSize"); Invalidate(); }
+    }
 
     /// Copies the engine book into the ladder's own arrays; the engine thread mutates the book.
     public void ScanBook(L2Book? book)
@@ -121,17 +126,44 @@ internal sealed class DepthLadder : UiControl
     }
 
     // ---------------------------------------------------------------- geometry
-    float RowH => S(18);
+    // Rows size themselves to the card: the ladder always draws the wheel's Levels so real book
+    // depth is never silently dropped, and each row stretches or shrinks so ask block + spread +
+    // bid block fill the height exactly (bounded so the price text still reads at either extreme).
+    const float MinRowH = 13f;      // below this the price text clips vertically
+    const float MaxRowH = 36f;      // beyond this rows read as empty boxes
+
     float HeadH => S(15);
     float SpreadH => S(30);
+    float BodyH => Height  - HeadH - SpreadH - S(4);
+
+
+    float TargetRowH => S(20);
+    int WantRows => Math.Clamp(Levels, 2, MaxLevels);
+    int DesiredHeight => (int)Math.Ceiling(HeadH + SpreadH + S(4) + 2 * WantRows * TargetRowH);
+
+    public override Size GetPreferredSize(Size proposed) => new Size(proposed.Width > 0 ? proposed.Width : (int)S(320), DesiredHeight);
+
+    int _levelsReq = 6;
+    
+
 
     int VisibleRows
     {
         get
         {
-            float body = Height - HeadH - SpreadH - S(4);
-            int per = (int)Math.Floor(body / 2f / RowH);
-            return Math.Clamp(per, 2, MaxLevels);
+            int want = Math.Clamp(Levels, 2, MaxLevels);
+            int fit = (int)Math.Floor(BodyH / (2f * S(MinRowH)));
+            return Math.Clamp(Math.Min(want, Math.Max(fit, 2)), 2, MaxLevels);
+        }
+    }
+
+    float RowH
+    {
+        get
+        {
+            int per = VisibleRows;
+            float raw = per > 0 ? BodyH / (2f * per) : S(MinRowH);
+            return Math.Clamp(raw, S(MinRowH), S(MaxRowH));
         }
     }
 

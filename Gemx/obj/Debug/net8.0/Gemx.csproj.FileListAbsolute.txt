@@ -9,3 +9,4 @@ C:\dev\mcp\src\mp4shader\Gemx\obj\Debug\net8.0\Gemx.dll
 C:\dev\mcp\src\mp4shader\Gemx\obj\Debug\net8.0\refint\Gemx.dll
 C:\dev\mcp\src\mp4shader\Gemx\obj\Debug\net8.0\Gemx.pdb
 C:\dev\mcp\src\mp4shader\Gemx\obj\Debug\net8.0\ref\Gemx.dll
+C:\dev\mcp\src\mp4shader\Gemx\obj\Debug\net8.0\Gemx.sourcelink.json

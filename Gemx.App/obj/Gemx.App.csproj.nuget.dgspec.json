@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\dev\\mcp\\src\\mp4shader\\Gemx.App\\Gemx.App.csproj": {}
+    "C:\\dev\\mcp\\src\\mp4shader\\gemx.app\\Gemx.App.csproj": {}
   },
   "projects": {
-    "C:\\dev\\mcp\\src\\mp4shader\\Gemx.App\\Gemx.App.csproj": {
+    "C:\\dev\\mcp\\src\\mp4shader\\gemx.app\\Gemx.App.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\dev\\mcp\\src\\mp4shader\\Gemx.App\\Gemx.App.csproj",
+        "projectUniqueName": "C:\\dev\\mcp\\src\\mp4shader\\gemx.app\\Gemx.App.csproj",
         "projectName": "Gemx.App",
-        "projectPath": "C:\\dev\\mcp\\src\\mp4shader\\Gemx.App\\Gemx.App.csproj",
+        "projectPath": "C:\\dev\\mcp\\src\\mp4shader\\gemx.app\\Gemx.App.csproj",
         "packagesPath": "C:\\Users\\ziggy\\.nuget\\packages\\",
-        "outputPath": "C:\\dev\\mcp\\src\\mp4shader\\Gemx.App\\obj\\",
+        "outputPath": "C:\\dev\\mcp\\src\\mp4shader\\gemx.app\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
