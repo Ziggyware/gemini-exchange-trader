@@ -14,7 +14,7 @@ public sealed class AppSettings
     public string MdUri { get; set; } = "wss://ws.gemini.com";
 
     [Category("Endpoints"), Description("Comma-separated stream names for the market-data SUBSCRIBE. Must include {symbol}@bookTicker; {symbol} expands to the lower-cased Symbol. Optional: {symbol}@depth for the imbalance signal.")]
-    public string MdSubs { get; set; } = "{symbol}@bookTicker";
+    public string MdSubs { get; set; } = "{symbol}@bookTicker,{symbol}@depth";
 
     [Category("Endpoints"), Description("Authenticated order WebSocket URI (ws:// or wss://).")]
     public string OrderUri { get; set; } = "wss://ws.gemini.com";
@@ -50,34 +50,52 @@ public sealed class AppSettings
     public double PaperBaseQty { get; set; } = 0;
 
     [Category("Quoting"), Description("Risk aversion gamma (> 0).")]
-    public double Gamma { get; set; } = 0.1;
+    public double Gamma { get; set; } = 0.18;
 
     [Category("Quoting"), Description("Order-arrival decay k (> 0), in 1/price units.")]
-    public double K { get; set; } = 1.5;
+    public double K { get; set; } = 1.8;
 
     [Category("Quoting"), Description("Inventory horizon T in seconds (> 0).")]
-    public double HorizonSec { get; set; } = 1.0;
+    public double HorizonSec { get; set; } = 0.75;
 
     [Category("Quoting"), Description("Drift coefficient applied to normalised order-flow imbalance, in price units.")]
-    public double Alpha { get; set; } = 0;
+    public double Alpha { get; set; } = 0.025;
 
     [Category("Quoting"), Description("Maker fee in basis points; sets the half-spread floor.")]
     public double MakerFeeBps { get; set; } = 0;
 
     [Category("Quoting"), Description("Minimum half-spread edge in price ticks.")]
-    public double MinEdgeTicks { get; set; } = 1;
+    public double MinEdgeTicks { get; set; } = 2;
 
     [Category("Quoting"), Description("Cancel and replace when the target moves by at least this many ticks.")]
     public long RequoteTicks { get; set; } = 2;
 
     [Category("Quoting"), Description("Weight of top-of-book depth imbalance added to the drift (0 disables). Needs a depth stream in MdSubs.")]
-    public double ImbalanceWeight { get; set; } = 0;
+    public double ImbalanceWeight { get; set; } = 0.02;
+
+    [Category("Signal fusion"), Description("Weight of short/long EMA price momentum in the reservation-price ensemble.")]
+    public double MomentumWeight { get; set; } = 0.12;
+
+    [Category("Signal fusion"), Description("Contrarian weight applied to standardized short-interval return surprise.")]
+    public double MeanReversionWeight { get; set; } = 0.08;
+
+    [Category("Signal fusion"), Description("Weight of normalized order-flow acceleration.")]
+    public double OfiAccelerationWeight { get; set; } = 0.01;
+
+    [Category("Signal fusion"), Description("Hard cap on total directional displacement, in ticks. This invariant prevents signal conviction from bypassing execution risk.")]
+    public double MaxSignalDriftTicks { get; set; } = 4;
+
+    [Category("Signal fusion"), Description("Smooth robust-influence scale for normalized signals. Smaller values reject outliers more aggressively.")]
+    public double RobustClipZ { get; set; } = 2.5;
+
+    [Category("Signal fusion"), Description("Directional-confidence penalty for standardized jump surprise.")]
+    public double JumpAttenuation { get; set; } = 0.5;
 
     [Category("Quoting"), Description("Book levels summed per side for the imbalance.")]
     public int ImbalanceLevels { get; set; } = 3;
 
     [Category("Quoting"), Description("Volatility grid samples required before quoting.")]
-    public int WarmupSamples { get; set; } = 50;
+    public int WarmupSamples { get; set; } = 300;
 
     [Category("Risk"), Description("Quantity per quote, decimal base units. Must be a multiple of the symbol's quantity step and at least its minimum.")]
     public string QuoteQty { get; set; } = "0.0001";
@@ -202,8 +220,10 @@ public sealed class AppSettings
         if (qty % spec.QtyStep8 != 0) throw new FormatException($"QuoteQty is not a multiple of the quantity step ({spec.QtyStep8} in 1e-8 units)");
         if (maxPos < qty) throw new FormatException("MaxPosition is smaller than QuoteQty");
         if (!(Gamma > 0) || !(K > 0) || !(HorizonSec > 0)) throw new FormatException("Gamma, K and HorizonSec must be > 0");
-        if (MakerFeeBps < 0 || MinEdgeTicks < 0 || RequoteTicks < 1 || WarmupSamples < 1 || MaxNotionalUsd < 1 || MaxLagMs <= 0 || RttMs < 0 || ImbalanceLevels < 1)
-            throw new FormatException("a risk or quoting parameter is out of range");
+        if (MakerFeeBps < 0 || MinEdgeTicks < 0 || RequoteTicks < 1 || WarmupSamples < 1 || MaxNotionalUsd < 1 || MaxLagMs <= 0 || RttMs < 0 || ImbalanceLevels < 1
+            || MomentumWeight < 0 || MeanReversionWeight < 0 || OfiAccelerationWeight < 0 || MaxSignalDriftTicks <= 0
+            || RobustClipZ <= 0 || JumpAttenuation < 0)
+            throw new FormatException("a risk, quoting, or signal-fusion parameter is out of range");
         return new EngineConfig
         {
             Q = new QuoteParams(Gamma, K, HorizonSec, Alpha, MakerFeeBps, MinEdgeTicks, spec.PriceTick8),
@@ -215,6 +235,12 @@ public sealed class AppSettings
             MaxLagNs = (long)(MaxLagMs * 1e6),
             RttSec = RttMs * 1e-3,
             ImbalanceWeight = ImbalanceWeight,
+            MomentumWeight = MomentumWeight,
+            MeanReversionWeight = MeanReversionWeight,
+            OfiAccelWeight = OfiAccelerationWeight,
+            MaxSignalDriftTicks = MaxSignalDriftTicks,
+            RobustClipZ = RobustClipZ,
+            JumpAttenuation = JumpAttenuation,
             ImbalanceLevels = ImbalanceLevels,
             Epoch = (ulong)(DateTimeOffset.UtcNow.ToUnixTimeSeconds() & 0xFFFFFFFFL)
         };

@@ -23,6 +23,11 @@ public sealed class EngineConfig
     public long FundsRetryNs = 10_000_000_000;
     public int WarmupSamples = 50, MaxConsecFaults = 3, MaxRejects = 5, ImbalanceLevels = 3;
     public double RttSec = 0.010, ImbalanceWeight = 0;
+    // Signal-fusion weights. All contributions are converted to price units before
+    // entering the reservation price and the aggregate is bounded by ticks.
+    public double MomentumWeight, MeanReversionWeight, OfiAccelWeight;
+    public double MaxSignalDriftTicks = 4;
+    public double RobustClipZ = 2.5, JumpAttenuation = 0.50;
     public ulong Epoch = 1;
 }
 
@@ -58,7 +63,14 @@ public struct EngineView
 
     // ── Improvement #10: Extended signal view ──
     public double Momentum, ZScore, SpreadRatio, OfiAccel;
+    public double ScaleCoherence, JumpScore, SignalConfidence;
+    public double TopologyImbalance, TopologyMicro, LiquidityConcentration, LiquiditySlope, LiquidityConvexity, LiquidityHysteresis, LiquidityTransience, GapFragility;
+    public double FastVariance, MediumVariance, SlowVariance, JumpIntensity, JumpVariance, LiquidityVariance, TailLoss, ModelUncertainty;
+    public double RegimeProbability, Contamination, SpectralShift, SpectralEntropy;
+    public double InventoryStress, LatencyStress, FillProbability, AdverseSelection, VenueReliability, FusedAlpha, LeverageScore;
     public int VolRegime; // 0=Low,1=Med,2=High,3=Extreme
+    public int MarketRegime;
+    public bool AnalyticsAbstain;
     public double SpreadQuality;
 }
 
@@ -75,6 +87,7 @@ public sealed class Engine
     public L2Book Book => _book;
 
     readonly Signals _s = new();
+    readonly MarketStateModel _state = new();
     LagGauge _lag;
     Leg _bid, _ask;
     bool _haveTick, _breaker, _posKnown, _baseSet, _killSent, _flushOk, _lastFillSell;
@@ -101,7 +114,7 @@ public sealed class Engine
         _c = c; _p = p; _out = output; _tap = tap;
     }
 
-    public bool Quoting => !_breaker && _haveTick && _posKnown && !Kill;
+    public bool Quoting => !_breaker && _haveTick && _posKnown && !Kill && !_state.State.Abstain;
 
     public bool TryReadView(out EngineView v)
     {
@@ -122,6 +135,7 @@ public sealed class Engine
 
     void Publish(long ns)
     {
+        EpistemicState es = _state.State;
         var v = new EngineView
         {
             RecvNs = ns,
@@ -175,6 +189,38 @@ public sealed class Engine
             ZScore = _s.ZScore,
             SpreadRatio = _s.SpreadRatio,
             OfiAccel = _s.OfiAccel,
+            ScaleCoherence = _s.ScaleCoherence,
+            JumpScore = _s.JumpScore,
+            SignalConfidence = es.AlphaReliability,
+            TopologyImbalance = es.Liquidity.Imbalance,
+            TopologyMicro = es.Liquidity.TopologyMicro,
+            LiquidityConcentration = es.Liquidity.Concentration,
+            LiquiditySlope = es.Liquidity.Slope,
+            LiquidityConvexity = es.Liquidity.Convexity,
+            LiquidityHysteresis = es.Liquidity.Hysteresis,
+            LiquidityTransience = es.Liquidity.Transience,
+            GapFragility = es.Liquidity.GapFragility,
+            FastVariance = es.Volatility.FastVariance,
+            MediumVariance = es.Volatility.MediumVariance,
+            SlowVariance = es.Volatility.SlowVariance,
+            JumpIntensity = es.Volatility.JumpIntensity,
+            JumpVariance = es.Volatility.JumpVariance,
+            LiquidityVariance = es.Volatility.LiquidityVariance,
+            TailLoss = es.Volatility.TailLoss,
+            ModelUncertainty = es.Volatility.ModelUncertainty,
+            RegimeProbability = es.RegimeProbability,
+            Contamination = es.Contamination,
+            SpectralShift = es.SpectralShift,
+            SpectralEntropy = es.SpectralEntropy,
+            InventoryStress = es.InventoryStress,
+            LatencyStress = es.LatencyStress,
+            FillProbability = es.FillProbability,
+            AdverseSelection = es.AdverseSelection,
+            VenueReliability = es.VenueReliability,
+            FusedAlpha = es.Alpha,
+            LeverageScore = es.LeverageScore,
+            MarketRegime = (int)es.Regime,
+            AnalyticsAbstain = es.Abstain,
             VolRegime = (int)_s.Regime,
             SpreadQuality = _s.SpreadQuality
         };
@@ -275,6 +321,8 @@ public sealed class Engine
             _book.Reset();
             ResyncMd++;
         }
+        else if (a == Applied.Ok)
+            _state.OnDepth(_book, _c.ImbalanceLevels, _s.Mid, _c.Q.Tick8 * 1e-8);
     }
 
     void OnBalance(in Msg m, long ns)
@@ -402,6 +450,9 @@ public sealed class Engine
     bool Healthy() =>
         _posKnown && _s.Samples >= _c.WarmupSamples && _lagExcess <= _c.MaxLagNs && _bestBid8 > 0 && _bestAsk8 > _bestBid8;
 
+    // Smooth bounded influence avoids discontinuities at a winsorization edge.
+    static double Robust(double x, double c) => c * Math.Tanh(x / c);
+
     void Think(long ns)
     {
         if (Kill)
@@ -419,8 +470,16 @@ public sealed class Engine
             _ask = default;
             SendFlush();
         }
-        if (!Healthy()) { PullAll(ns); return; }
-        double drift = _c.Q.Alpha * _s.OfiNorm;
+        // Analytics continues learning during warm-up and temporary health loss;
+        // execution remains blocked below until every hard health invariant holds.
+        // Weighted, bounded ensemble. OFI and depth describe liquidity topology;
+        // acceleration detects pressure transitions; momentum and standardized
+        // surprise deliberately oppose one another (trend vs. reversion).
+        double drift = _c.Q.Alpha * Robust(_s.OfiNorm, _c.RobustClipZ);
+        drift += _c.OfiAccelWeight * Robust(_s.OfiAccel, _c.RobustClipZ);
+        drift += _c.MomentumWeight * _s.Momentum;
+        drift -= _c.MeanReversionWeight * Robust(_s.ZScore, _c.RobustClipZ)
+                 * Math.Sqrt(Math.Max(0, _s.Sigma2) * 0.1);
 
         if (_book.Synced && _c.ImbalanceWeight != 0)
         {
@@ -433,9 +492,27 @@ public sealed class Engine
             if (sb + sa > 0) drift += _c.ImbalanceWeight * (sb - sa) / (sb + sa);
         }
 
+        double inventoryStress = _c.MaxPos8 > 0 ? Math.Clamp(Math.Abs((double)Pos8) / _c.MaxPos8, 0, 1) : 1;
+        EpistemicState es = _state.Observe(ns, _s, _lagExcess, _c.MaxLagNs, inventoryStress, drift, _c.JumpAttenuation);
+        drift = es.Alpha;
+        double maxDrift = _c.MaxSignalDriftTicks * (_c.Q.Tick8 / 1e8);
+        drift = Math.Clamp(drift, -maxDrift, maxDrift);
+
+        if (!Healthy()) { PullAll(ns); return; }
+
+        // Lexicographic sequencing: analytics may abstain, but can never relax a
+        // hard engine constraint. Existing live quotes are withdrawn first.
+        if (es.Abstain) { PullAll(ns); return; }
+
         double lagSec = _lagExcess * 1e-9 + _c.RttSec;
-        // ── Improvements #6-#9: Pass extended signals to quoter ──
-        Quoter.Compute(in _c.Q, _s.Micro, drift, _s.Sigma2, Pos8 * 1e-8, lagSec, _bestBid8, _bestAsk8, out long bid8, out long ask8,
+        double posteriorUncertainty = 1 - es.RegimeProbability;
+        double adaptiveGamma = _c.Q.Gamma * (1 + 1.5 * es.Contamination + inventoryStress
+            + posteriorUncertainty + 1.5 * (es.Regime == MarketRegime.JumpTransition ? es.RegimeProbability : 0));
+        var adaptive = _c.Q with { Gamma = adaptiveGamma };
+        double surfaceVariance = es.Volatility.At(_c.Q.HorizonSec);
+        double effectiveVariance = Math.Max(_s.Sigma2, surfaceVariance);
+        double topologyMicro = es.Liquidity.TopologyMicro > 0 ? es.Liquidity.TopologyMicro : _s.Micro;
+        Quoter.Compute(in adaptive, topologyMicro, drift, effectiveVariance, Pos8 * 1e-8, lagSec, _bestBid8, _bestAsk8, out long bid8, out long ask8,
             spreadRatio: _s.SpreadRatio, zScore: _s.ZScore, momentum: _s.Momentum, volRegime: (int)_s.Regime);
 
         _intBid8 = bid8;

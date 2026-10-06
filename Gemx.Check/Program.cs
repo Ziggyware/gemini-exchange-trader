@@ -288,6 +288,30 @@ static class P
             v.OnTicker(ns, mid - 0.005, 1, mid + 0.005, 1);
         }
         T.Ok("vol.recovers_sigma2", Math.Abs(v.Sigma2 / (sigma * sigma) - 1) < 0.3, $"{v.Sigma2}");
+
+        var trend = new Signals(0.1, 30, 1);
+        for (int i = 0; i < 1000; i++)
+            trend.OnTicker(i * 100_000_000L, 100 + i * 0.01, 2, 100.01 + i * 0.01, 1);
+        T.Ok("signal.zscore_is_live", Math.Abs(trend.ZScore) > 0.01, $"{trend.ZScore}");
+        T.Ok("signal.scale_coherence", trend.ScaleCoherence > 0.9, $"{trend.ScaleCoherence}");
+    }
+
+    static void Advanced()
+    {
+        var signals = new Signals(0.1, 30, 1);
+        var model = new MarketStateModel();
+        EpistemicState state = default;
+        for (int i = 1; i <= 2000; i++)
+        {
+            double mid = 100 + i * 0.001 + Math.Sin(i * 0.07) * 0.02;
+            signals.OnTicker(i * 100_000_000L, mid - 0.005, 2 + i % 3, mid + 0.005, 1 + i % 2);
+            state = model.Observe(i * 100_000_000L, signals, 1_000_000, 100_000_000, 0.1, 0.01, 0.5);
+        }
+        T.Ok("advanced.surface_finite", double.IsFinite(state.Volatility.FastVariance) && state.Volatility.FastVariance >= 0);
+        T.Ok("advanced.posterior_valid", state.RegimeProbability >= 0 && state.RegimeProbability <= 1);
+        T.Ok("advanced.reliability_bounded", state.AlphaReliability >= .05 && state.AlphaReliability <= 1);
+        T.Ok("advanced.invariant_alpha_contracts", Math.Abs(state.Alpha) <= .01 + 1e-12);
+        T.Ok("advanced.stress_finite", double.IsFinite(state.LeverageScore));
     }
 
     static void Quote()
@@ -600,7 +624,7 @@ static class P
 
     public static int Main()
     {
-        Fixed(); Rings(); Book(); Parser(); Auth(); Executor(); Signal(); Quote(); Scenario(); Funds(); Paper(); NoAlloc(); Determinism(); Replay();
+        Fixed(); Rings(); Book(); Parser(); Auth(); Executor(); Signal(); Advanced(); Quote(); Scenario(); Funds(); Paper(); NoAlloc(); Determinism(); Replay();
         Console.WriteLine($"pass={T.Pass} fail={T.Fail}");
         return T.Fail == 0 ? 0 : 1;
     }
